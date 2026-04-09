@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "description": "Display name of the user" },
+        "email": { "type": "string", "format": "email", "description": "Email address of the user" },
+        "role": { "type": "string", "enum": ["player", "admin", "system"], "description": "Role of the user" },
+        "createdAt": { "type": "number", "description": "Timestamp when the user was created" },
+        "lastSeen": { "type": "number", "description": "Timestamp when the user was last seen" },
+        "online": { "type": "boolean", "description": "Whether the user is currently online" }
+      },
+      "required": ["username", "email", "role", "createdAt", "lastSeen", "online"]
+    },
+    "Character": {
+      "title": "Character",
+      "description": "A game character",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "ID of the user who owns this character" },
+        "name": { "type": "string", "description": "Name of the character" },
+        "isSystem": { "type": "boolean", "description": "Whether this character is a system shop" },
+        "pin": { "type": "string", "description": "PIN for system shop access" },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "level": { "type": "number", "description": "Character level" },
+            "hp": { "type": "number", "description": "Character health points" },
+            "attack": { "type": "number", "description": "Character attack power" },
+            "defense": { "type": "number", "description": "Character defense power" },
+            "gold": { "type": "number", "description": "Amount of gold the character has" },
+            "experience": { "type": "number", "description": "Character experience points" }
+          },
+          "required": ["level", "hp", "attack", "defense", "gold", "experience"]
+        },
+        "createdAt": { "type": "number", "description": "Timestamp when the character was created" },
+        "updatedAt": { "type": "number", "description": "Timestamp when the character was last updated" }
+      },
+      "required": ["userId", "name", "stats", "createdAt", "updatedAt"]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "A log of a character update",
+      "type": "object",
+      "properties": {
+        "charId": { "type": "string", "description": "ID of the character that was updated" },
+        "userId": { "type": "string", "description": "ID of the user who made the update" },
+        "action": { "type": "string", "description": "Action performed (e.g., UPDATE)" },
+        "oldData": { "type": "object", "description": "Previous state of the character stats" },
+        "newData": { "type": "object", "description": "New state of the character stats" },
+        "ip": { "type": "string", "description": "IP address of the user (optional)" },
+        "userAgent": { "type": "string", "description": "User agent of the user (optional)" },
+        "timestamp": { "type": "number", "description": "Timestamp of the log" }
+      },
+      "required": ["charId", "userId", "action", "timestamp"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A transaction between two characters",
+      "type": "object",
+      "properties": {
+        "senderCharId": { "type": "string", "description": "ID of the sender character" },
+        "senderCharName": { "type": "string", "description": "Name of the sender character" },
+        "senderUserId": { "type": "string", "description": "ID of the sender user" },
+        "recipientCharId": { "type": "string", "description": "ID of the recipient character" },
+        "recipientCharName": { "type": "string", "description": "Name of the recipient character" },
+        "recipientUserId": { "type": "string", "description": "ID of the recipient user" },
+        "amount": { "type": "number", "description": "Amount of Vela transferred" },
+        "reason": { "type": "string", "description": "Reason for the transfer" },
+        "timestamp": { "type": "number", "description": "Timestamp of the transaction" }
+      },
+      "required": ["senderCharId", "senderCharName", "senderUserId", "recipientCharId", "recipientCharName", "recipientUserId", "amount", "reason", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles"
+    },
+    "/characters/{charId}": {
+      "schema": { "$ref": "#/entities/Character" },
+      "description": "Stores game characters"
+    },
+    "/logs/{logId}": {
+      "schema": { "$ref": "#/entities/Log" },
+      "description": "Stores logs of character updates"
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Stores transactions between characters"
+    }
+  }
+}
