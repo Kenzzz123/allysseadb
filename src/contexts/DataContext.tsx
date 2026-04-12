@@ -6,7 +6,6 @@ import { useAuth } from './AuthContext';
 export interface CharacterStats {
   level: number;
   exp: number;
-  valorPoint: number;
   karmaPoint: number;
   vela: number;
   totalIncome: number;

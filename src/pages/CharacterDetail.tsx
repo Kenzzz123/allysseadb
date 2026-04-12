@@ -16,7 +16,6 @@ export default function CharacterDetail() {
 
   const [addStats, setAddStats] = useState<Record<string, string | number>>({
     exp: '',
-    valorPoint: '',
     karmaPoint: '',
     vela: '',
     totalIncome: '',
@@ -70,7 +69,6 @@ export default function CharacterDetail() {
       };
 
       if (addStats.exp) newStats.exp = (newStats.exp || 0) + parseAdd(addStats.exp);
-      if (addStats.valorPoint) newStats.valorPoint = (newStats.valorPoint || 0) + parseAdd(addStats.valorPoint);
       if (addStats.karmaPoint) newStats.karmaPoint = (newStats.karmaPoint || 0) + parseAdd(addStats.karmaPoint);
       if (addStats.totalIncome) newStats.totalIncome = (newStats.totalIncome || 0) + parseAdd(addStats.totalIncome);
       if (addStats.totalExpense) newStats.totalExpense = (newStats.totalExpense || 0) + parseAdd(addStats.totalExpense);
@@ -86,7 +84,6 @@ export default function CharacterDetail() {
       // Reset add stats
       setAddStats({
         exp: '',
-        valorPoint: '',
         karmaPoint: '',
         vela: '',
         totalIncome: '',
@@ -212,7 +209,6 @@ export default function CharacterDetail() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {[
                 { key: 'exp', label: 'Experience', hideSystem: true },
-                { key: 'valorPoint', label: 'Valor Point', hideSystem: true },
                 { key: 'karmaPoint', label: 'Karma Point', hideSystem: true },
                 { key: 'totalIncome', label: 'Total Income' },
                 { key: 'totalExpense', label: 'Total Expense' },

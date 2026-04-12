@@ -89,9 +89,9 @@ export default function AdminPanel() {
   }
 
   const exportCSV = () => {
-    const headers = ['ID', 'Name', 'Owner ID', 'Level', 'EXP', 'Valor', 'Karma', 'Vela', 'Total Income', 'Total Expense', 'Created', 'Updated'];
+    const headers = ['ID', 'Name', 'Owner ID', 'Level', 'EXP', 'Karma', 'Vela', 'Total Income', 'Total Expense', 'Created', 'Updated'];
     const rows = allCharacters.map(c => [
-      c.id, c.name, c.userId, Math.floor((c.stats?.exp || 0) / 5000), c.stats.exp, c.stats.valorPoint, c.stats.karmaPoint, c.stats.vela, c.stats.totalIncome, c.stats.totalExpense,
+      c.id, c.name, c.userId, Math.floor((c.stats?.exp || 0) / 5000), c.stats.exp, c.stats.karmaPoint, c.stats.vela, c.stats.totalIncome, c.stats.totalExpense,
       new Date(c.createdAt).toISOString(), new Date(c.updatedAt).toISOString()
     ]);
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
@@ -204,7 +204,7 @@ export default function AdminPanel() {
                       <th className="p-4 font-medium">Owner</th>
                       <th className="p-4 font-medium">Level</th>
                       <th className="p-4 font-medium">EXP</th>
-                      <th className="p-4 font-medium">Valor / Karma</th>
+                      <th className="p-4 font-medium">Karma</th>
                       <th className="p-4 font-medium">Vela</th>
                       <th className="p-4 font-medium">Last Update</th>
                       <th className="p-4 font-medium text-right">Actions</th>
@@ -229,7 +229,6 @@ export default function AdminPanel() {
                           </td>
                           <td className="p-4 font-medium text-slate-700">{(char.stats?.exp || 0).toLocaleString()}</td>
                           <td className="p-4">
-                            <div className="text-orange-600 font-medium">{char.stats?.valorPoint || 0} V</div>
                             <div className="text-pink-600 font-medium">{char.stats?.karmaPoint || 0} K</div>
                           </td>
                           <td className="p-4 font-medium text-yellow-600">{(char.stats?.vela || 0).toLocaleString()}</td>
@@ -455,7 +454,6 @@ export default function AdminPanel() {
                     const changes = [];
                     if (log.oldData.level !== log.newData.level) changes.push(`Level ${log.oldData.level}→${log.newData.level}`);
                     if (log.oldData.exp !== log.newData.exp) changes.push(`EXP ${log.oldData.exp}→${log.newData.exp}`);
-                    if (log.oldData.valorPoint !== log.newData.valorPoint) changes.push(`Valor ${log.oldData.valorPoint}→${log.newData.valorPoint}`);
                     if (log.oldData.karmaPoint !== log.newData.karmaPoint) changes.push(`Karma ${log.oldData.karmaPoint}→${log.newData.karmaPoint}`);
                     if (log.oldData.vela !== log.newData.vela) changes.push(`Vela ${log.oldData.vela}→${log.newData.vela}`);
                     details = changes.join(', ');

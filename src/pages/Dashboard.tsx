@@ -17,7 +17,6 @@ export default function Dashboard() {
     await createCharacter(newCharName, {
       level: 0,
       exp: 0,
-      valorPoint: 0,
       karmaPoint: 0,
       vela: 0,
       totalIncome: 0,
@@ -110,10 +109,6 @@ export default function Dashboard() {
                       <div className="flex items-center gap-2 text-slate-700">
                         <TrendingUp className="w-4 h-4 text-indigo-500" />
                         <span className="font-medium">{(char.stats?.exp || 0).toLocaleString()} EXP</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-700">
-                        <Swords className="w-4 h-4 text-orange-500" />
-                        <span className="font-medium">{char.stats?.valorPoint || 0} Valor</span>
                       </div>
                       <div className="flex items-center gap-2 text-slate-700">
                         <Heart className="w-4 h-4 text-pink-500" />
