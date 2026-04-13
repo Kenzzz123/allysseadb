@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export default function AdminPanel() {
   const { userProfile } = useAuth();
-  const { allCharacters, allLogs, allUsers, allTransactions, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy } = useData();
+  const { allCharacters, allLogs, allUsers, allTransactions, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress } = useData();
   const [activeTab, setActiveTab] = useState<'characters' | 'logs' | 'users' | 'transactions'>('characters');
   const [searchTerm, setSearchTerm] = useState('');
   const [logFilter, setLogFilter] = useState<'ALL' | 'CREATE' | 'UPDATE' | 'DELETE' | 'UPDATE BY ADMIN'>('ALL');
@@ -20,7 +20,9 @@ export default function AdminPanel() {
   const [logToDelete, setLogToDelete] = useState<string | null>(null);
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const [showResetEconomyConfirm, setShowResetEconomyConfirm] = useState(false);
-  const [resetEconomyStep, setResetEconomyStep] = useState<1 | 2>(1);
+  const [showResetAllConfirm, setShowResetAllConfirm] = useState(false);
+  const [resetStep, setResetStep] = useState<1 | 2>(1);
+  const [resetType, setResetType] = useState<'economy' | 'all'>('economy');
   const [resetPinInput, setResetPinInput] = useState('');
   const [resetPinError, setResetPinError] = useState('');
   
@@ -430,10 +432,24 @@ export default function AdminPanel() {
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
                     <button 
-                      onClick={() => setShowResetEconomyConfirm(true)}
-                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-600 rounded-xl font-medium transition-colors text-sm"
+                      onClick={() => {
+                        setResetType('economy');
+                        setResetStep(1);
+                        setShowResetEconomyConfirm(true);
+                      }}
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-xl font-medium transition-colors text-sm"
                     >
-                      Reset Economy
+                      <Database className="w-4 h-4" /> Reset Economy
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setResetType('all');
+                        setResetStep(1);
+                        setShowResetAllConfirm(true);
+                      }}
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-xl font-medium transition-colors text-sm"
+                    >
+                      <Activity className="w-4 h-4" /> Reset All Progress
                     </button>
                     <button 
                       onClick={() => setShowClearAllConfirm(true)}
@@ -568,7 +584,7 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {showResetEconomyConfirm && (
+        {(showResetEconomyConfirm || showResetAllConfirm) && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
@@ -579,21 +595,30 @@ export default function AdminPanel() {
               <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Shield className="w-8 h-8" />
               </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">Reset Global Economy?</h3>
+              <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">
+                {resetType === 'economy' ? 'Reset Global Economy?' : 'Reset All Progress?'}
+              </h3>
               
-              {resetEconomyStep === 1 ? (
+              {resetStep === 1 ? (
                 <>
-                  <p className="text-slate-600 mb-6 text-center">Are you sure you want to reset the economy? This will set all Vela, Income, and Expense to 0 for ALL characters. Level, EXP, Valor, and Karma will NOT be affected.</p>
+                  <p className="text-slate-600 mb-6 text-center">
+                    {resetType === 'economy' 
+                      ? 'Are you sure you want to reset the economy? This will set all Vela, Income, and Expense to 0 for ALL characters. Level, EXP, and Karma will NOT be affected.'
+                      : 'Are you sure you want to reset ALL progress? This will set Level, EXP, Karma, Vela, Income, and Expense to 0 for ALL characters. This action is IRREVERSIBLE.'}
+                  </p>
                   <div className="flex justify-end gap-3">
                     <button 
-                      onClick={() => setShowResetEconomyConfirm(false)}
+                      onClick={() => {
+                        setShowResetEconomyConfirm(false);
+                        setShowResetAllConfirm(false);
+                      }}
                       className="flex-1 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors"
                     >
                       Cancel
                     </button>
                     <button 
                       onClick={() => {
-                        setResetEconomyStep(2);
+                        setResetStep(2);
                         setResetPinInput('');
                         setResetPinError('');
                       }}
@@ -619,7 +644,7 @@ export default function AdminPanel() {
                   <div className="flex justify-end gap-3">
                     <button 
                       onClick={() => {
-                        setResetEconomyStep(1);
+                        setResetStep(1);
                         setResetPinInput('');
                         setResetPinError('');
                       }}
@@ -633,9 +658,14 @@ export default function AdminPanel() {
                           setResetPinError('Incorrect PIN');
                           return;
                         }
-                        await resetEconomy();
-                        setShowResetEconomyConfirm(false);
-                        setResetEconomyStep(1);
+                        if (resetType === 'economy') {
+                          await resetEconomy();
+                          setShowResetEconomyConfirm(false);
+                        } else {
+                          await resetAllProgress();
+                          setShowResetAllConfirm(false);
+                        }
+                        setResetStep(1);
                         setResetPinInput('');
                       }}
                       disabled={userProfile.twoFactorPin ? resetPinInput.length !== 4 : false}

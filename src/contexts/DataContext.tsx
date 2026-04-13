@@ -67,6 +67,7 @@ interface DataContextType {
   deleteLog: (logId: string) => Promise<void>;
   clearAllLogs: () => Promise<void>;
   resetEconomy: () => Promise<void>;
+  resetAllProgress: () => Promise<void>;
   createTransaction: (senderCharId: string, recipientCharId: string, amount: number, reason: string) => Promise<void>;
 }
 
@@ -375,6 +376,44 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  const resetAllProgress = async () => {
+    if (!currentUser || userProfile?.role !== 'admin') return;
+    const { writeBatch } = await import('firebase/firestore');
+    
+    const chunks = [];
+    for (let i = 0; i < allCharacters.length; i += 500) {
+      chunks.push(allCharacters.slice(i, i + 500));
+    }
+    
+    for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach(char => {
+        batch.update(doc(db, 'characters', char.id), {
+          'stats.level': 0,
+          'stats.exp': 0,
+          'stats.karmaPoint': 0,
+          'stats.vela': 0,
+          'stats.totalIncome': 0,
+          'stats.totalExpense': 0,
+          updatedAt: Date.now()
+        });
+      });
+      await batch.commit();
+    }
+
+    // Create a log for the full reset
+    const newLogRef = doc(collection(db, 'logs'));
+    await setDoc(newLogRef, {
+      charId: 'SYSTEM',
+      charName: 'Global Reset',
+      userId: currentUser.uid,
+      username: userProfile?.username || 'Admin',
+      action: 'UPDATE',
+      reason: 'Admin triggered global progress reset',
+      timestamp: Date.now(),
+    });
+  };
+
   const createTransaction = async (senderCharId: string, recipientCharId: string, amount: number, reason: string) => {
     if (!currentUser) return;
     
@@ -466,7 +505,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <DataContext.Provider value={{ characters, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, createCharacter, updateCharacter, updateCharacterPin, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, createTransaction }}>
+    <DataContext.Provider value={{ characters, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, createCharacter, updateCharacter, updateCharacterPin, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress, createTransaction }}>
       {children}
     </DataContext.Provider>
   );
