@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User as FirebaseUser, signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { 
+  User as FirebaseUser, 
+  signInWithPopup, 
+  signInWithRedirect,
+  signOut, 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  getRedirectResult
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
 
@@ -20,6 +30,7 @@ interface AuthContextType {
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (e: string, p: string) => Promise<void>;
   registerWithEmail: (e: string, p: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -37,7 +48,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check for redirect result on mount
+    getRedirectResult(auth).then(async (result) => {
+      if (result?.user?.email) {
+        const bannedDoc = await getDoc(doc(db, 'banned_emails', result.user.email));
+        if (bannedDoc.exists()) {
+          await signOut(auth);
+          // We can't easily throw an error here that reaches the UI,
+          // but onAuthStateChanged will trigger and currentUser will be null.
+          // The landing page will show up.
+        }
+      }
+    }).catch(err => {
+      console.error("Redirect login error:", err);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user?.email) {
+        const bannedDoc = await getDoc(doc(db, 'banned_emails', user.email));
+        if (bannedDoc.exists()) {
+          setCurrentUser(null);
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+      }
+      
       setCurrentUser(user);
       if (user) {
         const userRef = doc(db, 'users', user.uid);
@@ -120,14 +156,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+      // Check if it's a mobile device and if we're NOT in an iframe
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const isInIframe = window.self !== window.top;
+
+      let result;
+      if (isMobile && !isInIframe) {
+        // Redirect is better for mobile browsers when not in an iframe
+        await signInWithRedirect(auth, googleProvider);
+        return; // Redirect resets the page
+      } else {
+        // Popup is better for desktop and iframe environments
+        result = await signInWithPopup(auth, googleProvider);
+      }
+
+      if (result?.user?.email) {
+        const bannedDoc = await getDoc(doc(db, 'banned_emails', result.user.email));
+        if (bannedDoc.exists()) {
+          await signOut(auth);
+          throw new Error('AKUN DI BANNED');
+        }
+      }
+    } catch (error: any) {
       console.error('Login error:', error);
+      if (error.code === 'auth/popup-blocked') {
+        throw new Error('Login popup was blocked by your browser. Please allow popups or open this app in a new tab.');
+      }
       throw error;
     }
   };
 
   const loginWithEmail = async (e: string, p: string) => {
+    // Check if email is banned before login
+    const bannedDoc = await getDoc(doc(db, 'banned_emails', e));
+    if (bannedDoc.exists()) {
+      throw new Error('AKUN DI BANNED');
+    }
+
     try {
       await signInWithEmailAndPassword(auth, e, p);
     } catch (error) {
@@ -137,10 +202,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const registerWithEmail = async (e: string, p: string) => {
+    // Check if email is banned
+    const bannedDoc = await getDoc(doc(db, 'banned_emails', e));
+    if (bannedDoc.exists()) {
+      throw new Error('AKUN DI BANNED');
+    }
+
     try {
       await createUserWithEmailAndPassword(auth, e, p);
     } catch (error) {
       console.error('Register error:', error);
+      throw error;
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (error) {
+      console.error('Reset password error:', error);
       throw error;
     }
   };
@@ -154,7 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ currentUser, userProfile, loading, loginWithGoogle, loginWithEmail, registerWithEmail, logout }}>
+    <AuthContext.Provider value={{ currentUser, userProfile, loading, loginWithGoogle, loginWithEmail, registerWithEmail, resetPassword, logout }}>
       {!loading && children}
     </AuthContext.Provider>
   );

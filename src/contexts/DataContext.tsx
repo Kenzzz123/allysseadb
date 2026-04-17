@@ -59,9 +59,11 @@ interface DataContextType {
   allTransactions: Transaction[]; // For admin
   createCharacter: (name: string, stats: CharacterStats) => Promise<void>;
   updateCharacter: (id: string, newStats: CharacterStats, from?: string, reason?: string) => Promise<void>;
+  renameCharacter: (id: string, newName: string) => Promise<void>;
   updateCharacterPin: (id: string, newPin: string | null) => Promise<void>;
   deleteCharacter: (id: string) => Promise<void>;
   deleteUser: (userId: string) => Promise<void>;
+  banUser: (userId: string, email: string) => Promise<void>;
   updateUserRole: (userId: string, newRole: 'player' | 'admin' | 'system') => Promise<void>;
   deleteLog: (logId: string) => Promise<void>;
   clearAllLogs: () => Promise<void>;
@@ -255,6 +257,32 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await setDoc(newLogRef, logData);
   };
 
+  const renameCharacter = async (id: string, newName: string) => {
+    if (!currentUser) return;
+    const char = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
+    if (!char) throw new Error('Character not found');
+
+    const now = Date.now();
+    const oldName = char.name;
+    
+    await setDoc(doc(db, 'characters', id), {
+      name: newName,
+      updatedAt: now,
+    }, { merge: true });
+
+    // Create log
+    const newLogRef = doc(collection(db, 'logs'));
+    await setDoc(newLogRef, {
+      charId: id,
+      charName: newName,
+      userId: char.userId,
+      username: userProfile?.username || 'Unknown',
+      action: 'UPDATE',
+      reason: `Name changed from "${oldName}" to "${newName}"`,
+      timestamp: now,
+    });
+  };
+
   const updateCharacterPin = async (id: string, newPin: string | null) => {
     if (!currentUser) return;
     const now = Date.now();
@@ -290,8 +318,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteUser = async (userId: string) => {
-    if (!currentUser || userProfile?.role !== 'admin') return;
+    if (!currentUser) return;
     
+    // Check if cleaning up self or if admin
+    const isAdmin = userProfile?.role === 'admin';
+    if (!isAdmin && currentUser.uid !== userId) return;
+
     // Delete user's characters
     const userChars = allCharacters.filter(c => c.userId === userId);
     for (const char of userChars) {
@@ -310,6 +342,31 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     // Delete user document
     await deleteDoc(doc(db, 'users', userId));
+  };
+
+  const banUser = async (userId: string, email: string) => {
+    if (!currentUser || userProfile?.role !== 'admin') return;
+
+    // 1. Add to banned_emails collection
+    await setDoc(doc(db, 'banned_emails', email), {
+      userId,
+      email,
+      bannedAt: Date.now(),
+      bannedBy: currentUser.uid
+    });
+
+    // 2. Delete user data (same as deleteUser)
+    await deleteUser(userId);
+
+    // 3. Create a special log for the ban
+    const newLogRef = doc(collection(db, 'logs'));
+    await setDoc(newLogRef, {
+      action: 'ADMIN_ACTION',
+      reason: `User ${email} has been BANNED from the system.`,
+      timestamp: Date.now(),
+      userId: currentUser.uid,
+      username: userProfile?.username || 'Admin'
+    });
   };
 
   const updateUserRole = async (userId: string, newRole: 'player' | 'admin' | 'system') => {
@@ -503,7 +560,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <DataContext.Provider value={{ characters, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, createCharacter, updateCharacter, updateCharacterPin, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress, createTransaction }}>
+    <DataContext.Provider value={{ characters, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, createCharacter, updateCharacter, renameCharacter, updateCharacterPin, deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress, createTransaction }}>
       {children}
     </DataContext.Provider>
   );

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { X, Shield, Key, AlertCircle, CheckCircle2, User } from 'lucide-react';
+import { X, Shield, Key, AlertCircle, CheckCircle2, User, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { updatePassword } from 'firebase/auth';
+import { useData } from '../contexts/DataContext';
+import { updatePassword, deleteUser as deleteAuthUser } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, logout } = useAuth();
+  const { deleteUser } = useData();
   const [activeTab, setActiveTab] = useState<'security'>('security');
   
   const [newUsername, setNewUsername] = useState(userProfile?.username || '');
@@ -17,6 +19,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const [pin, setPin] = useState('');
   const [is2FAEnabled, setIs2FAEnabled] = useState(!!userProfile?.twoFactorPin);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteStep, setDeleteStep] = useState(1);
+  const [deletePin, setDeletePin] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   const handleUpdateUsername = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,9 +113,40 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
+    
+    // If admin and has PIN, check it
+    if (userProfile?.role === 'admin' && userProfile.twoFactorPin) {
+      if (deletePin !== userProfile.twoFactorPin) {
+        setDeleteError('Incorrect Security PIN');
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      await deleteUser(currentUser.uid);
+      await deleteAuthUser(currentUser);
+      onClose();
+      await logout();
+    } catch (error: any) {
+      if (error.code === 'auth/requires-recent-login') {
+        setDeleteError('Requires recent login. Please re-login and try again.');
+      } else {
+        // Even if auth delete fails, the firestore data is likely gone or will be handled
+        setDeleteError(error.message || 'Failed to delete account');
+        // Final attempt to logout
+        await logout();
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden">
+      <div className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden relative max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b border-slate-100">
           <h2 className="text-xl font-bold text-slate-900">Settings</h2>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors">
@@ -245,7 +283,98 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
           )}
+
+          {/* Delete Account Section */}
+          <div className="space-y-4 pt-6 border-t border-slate-100">
+            <div className="flex items-center gap-2 text-red-600 font-bold">
+              <Trash2 className="w-5 h-5" />
+              <h3>Danger Zone</h3>
+            </div>
+            <p className="text-sm text-slate-500">
+              Permanently delete your account and all associated records. This action is irreversible.
+            </p>
+            <button
+              onClick={() => {
+                setDeleteStep(1);
+                setShowDeleteConfirm(true);
+              }}
+              className="w-full py-2 bg-red-50 text-red-600 rounded-xl font-medium hover:bg-red-100 transition-colors"
+            >
+              Delete My Account
+            </button>
+          </div>
         </div>
+
+        {/* Delete Confirmation Modal (2SV) */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">Delete Account?</h3>
+              
+              {deleteStep === 1 ? (
+                <>
+                  <p className="text-slate-600 mb-6 text-center">
+                    Are you absolutely sure? All your records, transactions, and profile data will be permanently erased.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        if (userProfile?.role === 'admin' && userProfile.twoFactorPin) {
+                          setDeleteStep(2);
+                        } else {
+                          handleDeleteAccount();
+                        }
+                      }}
+                      className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+                    >
+                      Yes, Proceed to Delete
+                    </button>
+                    <button 
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-slate-600 text-center text-sm">
+                    Enter your Admin Security PIN to confirm this action.
+                  </p>
+                  {deleteError && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl text-center">{deleteError}</div>}
+                  <input
+                    type="password"
+                    value={deletePin}
+                    onChange={(e) => setDeletePin(e.target.value)}
+                    placeholder="Enter Security PIN"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-center font-bold text-2xl tracking-widest focus:ring-2 focus:ring-red-500"
+                    maxLength={6}
+                    autoFocus
+                  />
+                  <div className="flex flex-col gap-2">
+                    <button
+                      disabled={loading}
+                      onClick={handleDeleteAccount}
+                      className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors disabled:opacity-50"
+                    >
+                      {loading ? 'Deleting...' : 'Confirm Delete'}
+                    </button>
+                    <button 
+                      onClick={() => setDeleteStep(1)}
+                      className="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-bold"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

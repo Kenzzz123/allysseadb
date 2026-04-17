@@ -4,11 +4,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { Gamepad2, Shield, Zap, Users, ArrowRight } from 'lucide-react';
 
 export default function Landing() {
-  const { loginWithGoogle, loginWithEmail, registerWithEmail, currentUser } = useAuth();
+  const { loginWithGoogle, loginWithEmail, registerWithEmail, resetPassword, currentUser } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   React.useEffect(() => {
     if (currentUser) {
@@ -55,9 +57,13 @@ export default function Landing() {
         </div>
 
         <div className="mt-8 max-w-sm mx-auto bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">Or use Email / Password</h3>
+          <h3 className="text-lg font-bold text-slate-900 mb-4">
+            {isResetting ? 'Reset Password' : 'Or use Email / Password'}
+          </h3>
           {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl">{error}</div>}
-          <form className="space-y-4">
+          {success && <div className="mb-4 p-3 bg-emerald-50 text-emerald-600 text-sm rounded-xl">{success}</div>}
+          
+          <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
             <input 
               type="email" 
               value={email}
@@ -66,49 +72,92 @@ export default function Landing() {
               required 
               className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500" 
             />
-            <input 
-              type="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password" 
-              required 
-              className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500" 
-            />
-            <div className="flex gap-2">
-              <button 
-                type="button" 
-                onClick={async () => {
-                  try { setError(''); await loginWithEmail(email, password); } 
-                  catch (err: any) { 
-                    if (err.code === 'auth/operation-not-allowed') {
-                      setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
-                    } else if (err.code === 'auth/invalid-credential') {
-                      setError("Invalid email or password. If you haven't created this account yet, please click 'Register' instead.");
-                    } else {
-                      setError(err.message || 'Login failed'); 
-                    }
-                  }
-                }}
-                className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
-              >
-                Login
-              </button>
-              <button 
-                type="button" 
-                onClick={async () => {
-                  try { setError(''); await registerWithEmail(email, password); } 
-                  catch (err: any) { 
-                    if (err.code === 'auth/operation-not-allowed') {
-                      setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
-                    } else {
-                      setError(err.message || 'Registration failed'); 
-                    }
-                  }
-                }}
-                className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200"
-              >
-                Register
-              </button>
+            {!isResetting && (
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password" 
+                required 
+                className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500" 
+              />
+            )}
+            
+            <div className="flex flex-col gap-2">
+              {isResetting ? (
+                <>
+                  <button 
+                    type="button" 
+                    onClick={async () => {
+                      if (!email) { setError('Please enter your email address first.'); return; }
+                      try { 
+                        setError(''); 
+                        setSuccess('');
+                        await resetPassword(email); 
+                        setSuccess('Password reset link sent! Please check your email inbox.');
+                        setIsResetting(false);
+                      } 
+                      catch (err: any) { setError(err.message || 'Reset failed'); }
+                    }}
+                    className="w-full py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
+                  >
+                    Send Reset Link
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => { setIsResetting(false); setError(''); setSuccess(''); }}
+                    className="w-full py-2 bg-slate-100 text-slate-700 rounded-xl font-medium"
+                  >
+                    Back to Login
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <button 
+                      type="button" 
+                      onClick={async () => {
+                        try { setError(''); setSuccess(''); await loginWithEmail(email, password); } 
+                        catch (err: any) { 
+                          if (err.code === 'auth/operation-not-allowed') {
+                            setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
+                          } else if (err.code === 'auth/invalid-credential') {
+                            setError("Invalid email or password. If you haven't created this account yet, please click 'Register' instead.");
+                          } else {
+                            setError(err.message || 'Login failed'); 
+                          }
+                        }
+                      }}
+                      className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
+                    >
+                      Login
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={async () => {
+                        try { setError(''); setSuccess(''); await registerWithEmail(email, password); } 
+                        catch (err: any) { 
+                          if (err.code === 'auth/operation-not-allowed') {
+                            setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
+                          } else {
+                            setError(err.message || 'Registration failed'); 
+                          }
+                        }
+                      }}
+                      className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200"
+                    >
+                      Register
+                    </button>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => { setIsResetting(true); setError(''); setSuccess(''); }}
+                    className="text-sm text-indigo-600 hover:underline mt-2 text-center"
+                  >
+                    Forgot Password?
+                  </button>
+                </>
+              )}
             </div>
           </form>
         </div>

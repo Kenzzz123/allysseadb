@@ -2,13 +2,42 @@ import React, { useState, useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Navigate, Link } from 'react-router-dom';
-import { Users, Database, Activity, Search, Download, Shield, Trash2, ArrowRightLeft } from 'lucide-react';
+import { 
+  Users, 
+  Database, 
+  Activity, 
+  Search, 
+  Download, 
+  Shield, 
+  Trash2, 
+  ArrowRightLeft, 
+  Ban,
+  TrendingUp,
+  Coins,
+  History,
+  Check,
+  X,
+  AlertCircle
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function AdminPanel() {
   const { userProfile } = useAuth();
-  const { allCharacters, allLogs, allUsers, allTransactions, deleteCharacter, deleteUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress } = useData();
+  const { 
+    allCharacters, 
+    allLogs, 
+    allUsers, 
+    allTransactions, 
+    deleteCharacter, 
+    deleteUser, 
+    banUser, 
+    updateUserRole, 
+    deleteLog, 
+    clearAllLogs, 
+    resetEconomy, 
+    resetAllProgress 
+  } = useData();
   const [activeTab, setActiveTab] = useState<'characters' | 'logs' | 'users' | 'transactions'>('characters');
   const [searchTerm, setSearchTerm] = useState('');
   const [logFilter, setLogFilter] = useState<'ALL' | 'CREATE' | 'UPDATE' | 'DELETE' | 'UPDATE BY ADMIN'>('ALL');
@@ -25,6 +54,14 @@ export default function AdminPanel() {
   const [resetType, setResetType] = useState<'economy' | 'all'>('economy');
   const [resetPinInput, setResetPinInput] = useState('');
   const [resetPinError, setResetPinError] = useState('');
+  
+  // User Actions Modal
+  const [showUserActionConfirm, setShowUserActionConfirm] = useState(false);
+  const [userActionType, setUserActionType] = useState<'delete' | 'ban'>('delete');
+  const [targetUser, setTargetUser] = useState<any>(null);
+  const [userActionStep, setUserActionStep] = useState(1);
+  const [userActionPin, setUserActionPin] = useState('');
+  const [userActionError, setUserActionError] = useState('');
   
   // 2FA State
   const [is2FAVerified, setIs2FAVerified] = useState(false);
@@ -317,17 +354,36 @@ export default function AdminPanel() {
                           <td className="p-4 text-slate-500">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Unknown'}</td>
                           <td className="p-4 text-right">
                             {user.role !== 'admin' && (
-                              <button
-                                onClick={async () => {
-                                  if (window.confirm(`Are you sure you want to delete user ${user.username} and all their characters? This action cannot be undone.`)) {
-                                    await deleteUser(user.id);
-                                  }
-                                }}
-                                className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Delete User"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex justify-end gap-1">
+                                <button
+                                  onClick={() => {
+                                    setTargetUser(user);
+                                    setUserActionType('ban');
+                                    setUserActionStep(1);
+                                    setUserActionPin('');
+                                    setUserActionError('');
+                                    setShowUserActionConfirm(true);
+                                  }}
+                                  className="p-2 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors"
+                                  title="Ban User"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setTargetUser(user);
+                                    setUserActionType('delete');
+                                    setUserActionStep(1);
+                                    setUserActionPin('');
+                                    setUserActionError('');
+                                    setShowUserActionConfirm(true);
+                                  }}
+                                  className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Delete User"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -704,6 +760,93 @@ export default function AdminPanel() {
                   Delete
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showUserActionConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl"
+            >
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${userActionType === 'ban' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
+                {userActionType === 'ban' ? <Ban className="w-8 h-8" /> : <Trash2 className="w-8 h-8" />}
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">
+                {userActionType === 'ban' ? 'Ban User Account?' : 'Delete User Account?'}
+              </h3>
+              
+              {userActionStep === 1 ? (
+                <>
+                  <p className="text-slate-600 mb-6 text-center">
+                    {userActionType === 'ban' 
+                      ? `Are you sure you want to BAN ${targetUser?.email}? They will be logged out and unable to register again with this email.`
+                      : `Are you sure you want to DELETE ${targetUser?.email}? All their records and profile data will be erased permanently.`}
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => setUserActionStep(2)}
+                      className={`w-full py-3 text-white rounded-xl font-bold transition-colors ${userActionType === 'ban' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}
+                    >
+                      {userActionType === 'ban' ? 'Yes, Ban Account' : 'Yes, Delete Account'}
+                    </button>
+                    <button 
+                      onClick={() => setShowUserActionConfirm(false)}
+                      className="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-slate-600 text-center text-sm">
+                    This action requires 2-Step Verification. Enter your Security PIN to confirm.
+                  </p>
+                  {userActionError && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl text-center">{userActionError}</div>}
+                  <input
+                    type="password"
+                    value={userActionPin}
+                    onChange={(e) => setUserActionPin(e.target.value)}
+                    placeholder="Enter Security PIN"
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-center font-bold text-2xl tracking-widest focus:ring-2 focus:ring-indigo-500"
+                    maxLength={6}
+                    autoFocus
+                  />
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={async () => {
+                        if (userActionPin !== userProfile?.twoFactorPin) {
+                          setUserActionError('Incorrect Security PIN');
+                          return;
+                        }
+                        try {
+                          if (userActionType === 'ban') {
+                            await banUser(targetUser.id, targetUser.email);
+                          } else {
+                            await deleteUser(targetUser.id);
+                          }
+                          setShowUserActionConfirm(false);
+                        } catch (err: any) {
+                          setUserActionError(err.message || 'Action failed');
+                        }
+                      }}
+                      className={`w-full py-3 text-white rounded-xl font-bold transition-colors ${userActionType === 'ban' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}
+                    >
+                      Confirm {userActionType === 'ban' ? 'Ban' : 'Delete'}
+                    </button>
+                    <button 
+                      onClick={() => setUserActionStep(1)}
+                      className="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-bold"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

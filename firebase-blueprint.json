@@ -90,6 +90,19 @@
     "/transactions/{transactionId}": {
       "schema": { "$ref": "#/entities/Transaction" },
       "description": "Stores transactions between characters"
+    },
+    "/banned_emails/{email}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "email": { "type": "string" },
+          "bannedAt": { "type": "number" },
+          "bannedBy": { "type": "string" }
+        },
+        "required": ["userId", "email", "bannedAt", "bannedBy"]
+      },
+      "description": "Stores email addresses that are banned from the system"
     }
   }
 }

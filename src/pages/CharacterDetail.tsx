@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useData, CharacterStats } from '../contexts/DataContext';
-import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield, Edit2, Check, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
 
 export default function CharacterDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { characters, allCharacters, updateCharacter, deleteCharacter, logs, allLogs } = useData();
+  const { characters, allCharacters, updateCharacter, renameCharacter, deleteCharacter, logs, allLogs } = useData();
   
   // Find character in user's characters or all characters (if admin)
   const character = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
   const charLogs = (logs.length > 0 ? logs : allLogs).filter(l => l.charId === id).sort((a, b) => b.timestamp - a.timestamp);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
+
+  useEffect(() => {
+    if (character) {
+      setTempName(character.name);
+    }
+  }, [character?.name]);
 
   const [addStats, setAddStats] = useState<Record<string, string | number>>({
     level: '',
@@ -184,7 +193,44 @@ export default function CharacterDetail() {
             <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-3xl sm:text-4xl font-bold shadow-lg mb-4">
               {character.name.charAt(0).toUpperCase()}
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{character.name}</h1>
+            
+            {isEditingName ? (
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value={tempName}
+                  onChange={(e) => setTempName(e.target.value)}
+                  className="w-full px-3 py-1 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-center font-bold text-xl"
+                  autoFocus
+                />
+                <button 
+                  onClick={async () => {
+                    if (tempName.trim() && tempName !== character.name) {
+                      await renameCharacter(character.id, tempName.trim());
+                    }
+                    setIsEditingName(false);
+                  }}
+                  className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg hover:bg-emerald-200 transition-colors"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => {
+                    setTempName(character.name);
+                    setIsEditingName(false);
+                  }}
+                  className="p-1.5 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 group justify-center mb-2 cursor-pointer" onClick={() => setIsEditingName(true)}>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{character.name}</h1>
+                <Edit2 className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 transition-colors" />
+              </div>
+            )}
+
             {!character.isSystem && (
               <p className="text-slate-500 mt-1">Level {character.stats?.level || 0}</p>
             )}
