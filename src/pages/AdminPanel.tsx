@@ -91,9 +91,9 @@ export default function AdminPanel() {
   }
 
   const exportCSV = () => {
-    const headers = ['ID', 'Name', 'Owner ID', 'Level', 'EXP', 'Karma', 'Vela', 'Total Income', 'Total Expense', 'Created', 'Updated'];
+    const headers = ['ID', 'Name', 'Owner ID', 'Level', 'Karma', 'Vela', 'Total Income', 'Total Expense', 'Created', 'Updated'];
     const rows = allCharacters.map(c => [
-      c.id, c.name, c.userId, Math.floor((c.stats?.exp || 0) / 5000), c.stats.exp, c.stats.karmaPoint, c.stats.vela, c.stats.totalIncome, c.stats.totalExpense,
+      c.id, c.name, c.userId, c.stats.level || 0, c.stats.karmaPoint, c.stats.vela, c.stats.totalIncome, c.stats.totalExpense,
       new Date(c.createdAt).toISOString(), new Date(c.updatedAt).toISOString()
     ]);
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
@@ -205,7 +205,6 @@ export default function AdminPanel() {
                       <th className="p-4 font-medium rounded-tl-xl">Name</th>
                       <th className="p-4 font-medium">Owner</th>
                       <th className="p-4 font-medium">Level</th>
-                      <th className="p-4 font-medium">EXP</th>
                       <th className="p-4 font-medium">Karma</th>
                       <th className="p-4 font-medium">Vela</th>
                       <th className="p-4 font-medium">Last Update</th>
@@ -227,9 +226,8 @@ export default function AdminPanel() {
                             <div className="text-slate-500 font-mono text-xs" title={char.userId}>{char.userId.slice(0, 8)}...</div>
                           </td>
                           <td className="p-4">
-                            <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-medium">Lv {Math.floor((char.stats?.exp || 0) / 5000)}</span>
+                            <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-medium">Lv {char.stats?.level || 0}</span>
                           </td>
-                          <td className="p-4 font-medium text-slate-700">{(char.stats?.exp || 0).toLocaleString()}</td>
                           <td className="p-4">
                             <div className="text-pink-600 font-medium">{char.stats?.karmaPoint || 0} K</div>
                           </td>
@@ -469,7 +467,6 @@ export default function AdminPanel() {
                   if ((log.action === 'UPDATE' || log.action === 'UPDATE BY ADMIN') && log.oldData && log.newData) {
                     const changes = [];
                     if (log.oldData.level !== log.newData.level) changes.push(`Level ${log.oldData.level}→${log.newData.level}`);
-                    if (log.oldData.exp !== log.newData.exp) changes.push(`EXP ${log.oldData.exp}→${log.newData.exp}`);
                     if (log.oldData.karmaPoint !== log.newData.karmaPoint) changes.push(`Karma ${log.oldData.karmaPoint}→${log.newData.karmaPoint}`);
                     if (log.oldData.vela !== log.newData.vela) changes.push(`Vela ${log.oldData.vela}→${log.newData.vela}`);
                     details = changes.join(', ');

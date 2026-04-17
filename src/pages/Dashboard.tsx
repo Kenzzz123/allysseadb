@@ -16,7 +16,6 @@ export default function Dashboard() {
     
     await createCharacter(newCharName, {
       level: 0,
-      exp: 0,
       karmaPoint: 0,
       vela: 0,
       totalIncome: 0,
@@ -28,11 +27,11 @@ export default function Dashboard() {
   };
 
   const sortedCharacters = useMemo(() => {
-    return [...characters].sort((a, b) => Math.floor((b.stats?.exp || 0) / 5000) - Math.floor((a.stats?.exp || 0) / 5000) || (b.stats?.vela || 0) - (a.stats?.vela || 0));
+    return [...characters].sort((a, b) => (b.stats?.level || 0) - (a.stats?.level || 0) || (b.stats?.vela || 0) - (a.stats?.vela || 0));
   }, [characters]);
 
   const totalVela = useMemo(() => characters.reduce((sum, c) => sum + (c.stats?.vela || 0), 0), [characters]);
-  const avgLevel = useMemo(() => characters.length ? Math.round(characters.reduce((sum, c) => sum + Math.floor((c.stats?.exp || 0) / 5000), 0) / characters.length) : 0, [characters]);
+  const avgLevel = useMemo(() => characters.length ? Math.round(characters.reduce((sum, c) => sum + (c.stats?.level || 0), 0) / characters.length) : 0, [characters]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -98,7 +97,7 @@ export default function Dashboard() {
                   </div>
                   {!char.isSystem && (
                     <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-lg">
-                      Lv{Math.floor((char.stats?.exp || 0) / 5000)}
+                      Lv{char.stats?.level || 0}
                     </div>
                   )}
                 </div>
@@ -106,10 +105,6 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   {!char.isSystem && (
                     <>
-                      <div className="flex items-center gap-2 text-slate-700">
-                        <TrendingUp className="w-4 h-4 text-indigo-500" />
-                        <span className="font-medium">{(char.stats?.exp || 0).toLocaleString()} EXP</span>
-                      </div>
                       <div className="flex items-center gap-2 text-slate-700">
                         <Heart className="w-4 h-4 text-pink-500" />
                         <span className="font-medium">{char.stats?.karmaPoint || 0} Karma</span>

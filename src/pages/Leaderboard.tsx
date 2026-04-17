@@ -5,15 +5,15 @@ import { motion } from 'motion/react';
 
 export default function Leaderboard() {
   const { allCharacters } = useData();
-  const [activeTab, setActiveTab] = useState<'vela' | 'exp'>('vela');
+  const [activeTab, setActiveTab] = useState<'vela' | 'level'>('vela');
 
   // Filter out system characters
   const eligibleCharacters = allCharacters.filter(c => !c.isSystem);
 
   const velaLeaderboard = [...eligibleCharacters].sort((a, b) => (b.stats?.vela || 0) - (a.stats?.vela || 0));
-  const expLeaderboard = [...eligibleCharacters].sort((a, b) => (b.stats?.exp || 0) - (a.stats?.exp || 0));
+  const levelLeaderboard = [...eligibleCharacters].sort((a, b) => (b.stats?.level || 0) - (a.stats?.level || 0));
 
-  const currentList = activeTab === 'vela' ? velaLeaderboard : expLeaderboard;
+  const currentList = activeTab === 'vela' ? velaLeaderboard : levelLeaderboard;
 
   const getRankLabel = (index: number) => {
     if (index === 0) return '1st';
@@ -37,7 +37,7 @@ export default function Leaderboard() {
           Hall of Fame
         </h1>
         <p className="text-slate-500 max-w-2xl mx-auto">
-          The most prestigious characters in the realm, ranked by their wealth and experience.
+          The most prestigious characters in the realm, ranked by their wealth and level.
         </p>
       </div>
 
@@ -53,21 +53,21 @@ export default function Leaderboard() {
           Top Wealth (Vela)
         </button>
         <button
-          onClick={() => setActiveTab('exp')}
+          onClick={() => setActiveTab('level')}
           className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
-            activeTab === 'exp' 
+            activeTab === 'level' 
               ? 'bg-indigo-600 text-white shadow-md' 
               : 'text-slate-500 hover:bg-slate-50'
           }`}
         >
-          Top Experience (EXP)
+          Top Level
         </button>
       </div>
 
       <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
           <h2 className="font-bold text-slate-700 uppercase tracking-wider text-sm">
-            {activeTab === 'vela' ? 'Vela Rankings' : 'Experience Rankings'}
+            {activeTab === 'vela' ? 'Vela Rankings' : 'Level Rankings'}
           </h2>
           <span className="text-xs font-medium text-slate-500 bg-white px-3 py-1 rounded-full border border-slate-200">
             {currentList.length} Characters
@@ -119,11 +119,7 @@ export default function Leaderboard() {
                   <div className="flex flex-col items-end">
                     <div className="font-mono font-bold text-indigo-600 flex items-center gap-1.5">
                       <span>---</span>
-                      {(char.stats?.exp || 0).toLocaleString()} EXP
-                    </div>
-                    <div className="text-xs font-medium text-slate-500 flex items-center gap-1 mt-0.5">
-                      <Star className="w-3 h-3" />
-                      Level {Math.floor((char.stats?.exp || 0) / 5000)}
+                      Level {(char.stats?.level || 0)}
                     </div>
                   </div>
                 )}

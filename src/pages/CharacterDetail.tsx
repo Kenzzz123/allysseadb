@@ -15,7 +15,7 @@ export default function CharacterDetail() {
   const charLogs = (logs.length > 0 ? logs : allLogs).filter(l => l.charId === id).sort((a, b) => b.timestamp - a.timestamp);
 
   const [addStats, setAddStats] = useState<Record<string, string | number>>({
-    exp: '',
+    level: '',
     karmaPoint: '',
     vela: '',
     totalIncome: '',
@@ -68,22 +68,19 @@ export default function CharacterDetail() {
         return isNaN(parsed) ? 0 : parsed;
       };
 
-      if (addStats.exp) newStats.exp = (newStats.exp || 0) + parseAdd(addStats.exp);
+      if (addStats.level) newStats.level = (newStats.level || 0) + parseAdd(addStats.level);
       if (addStats.karmaPoint) newStats.karmaPoint = (newStats.karmaPoint || 0) + parseAdd(addStats.karmaPoint);
       if (addStats.totalIncome) newStats.totalIncome = (newStats.totalIncome || 0) + parseAdd(addStats.totalIncome);
       if (addStats.totalExpense) newStats.totalExpense = (newStats.totalExpense || 0) + parseAdd(addStats.totalExpense);
       
       // Auto-calculate Vela
       newStats.vela = (newStats.totalIncome || 0) - (newStats.totalExpense || 0);
-      
-      // Auto-calculate level based on EXP (1 level per 5000 EXP)
-      newStats.level = Math.floor(newStats.exp / 5000);
 
       await updateCharacter(id, newStats, updateFrom, updateReason);
       
       // Reset add stats
       setAddStats({
-        exp: '',
+        level: '',
         karmaPoint: '',
         vela: '',
         totalIncome: '',
@@ -189,7 +186,7 @@ export default function CharacterDetail() {
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{character.name}</h1>
             {!character.isSystem && (
-              <p className="text-slate-500 mt-1">Level {Math.floor((character.stats?.exp || 0) / 5000)}</p>
+              <p className="text-slate-500 mt-1">Level {character.stats?.level || 0}</p>
             )}
             <div className="mt-4 px-4 py-2 bg-yellow-50 text-yellow-700 rounded-full font-bold flex items-center gap-2">
               <span className="text-xl">💰</span> {(character.stats?.vela || 0).toLocaleString()} Vela
@@ -208,7 +205,7 @@ export default function CharacterDetail() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {[
-                { key: 'exp', label: 'Experience', hideSystem: true },
+                { key: 'level', label: 'Level', hideSystem: true },
                 { key: 'karmaPoint', label: 'Karma Point', hideSystem: true },
                 { key: 'totalIncome', label: 'Total Income' },
                 { key: 'totalExpense', label: 'Total Expense' },

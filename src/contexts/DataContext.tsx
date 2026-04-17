@@ -5,7 +5,6 @@ import { useAuth } from './AuthContext';
 
 export interface CharacterStats {
   level: number;
-  exp: number;
   karmaPoint: number;
   vela: number;
   totalIncome: number;
@@ -390,7 +389,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       chunk.forEach(char => {
         batch.update(doc(db, 'characters', char.id), {
           'stats.level': 0,
-          'stats.exp': 0,
           'stats.karmaPoint': 0,
           'stats.vela': 0,
           'stats.totalIncome': 0,
