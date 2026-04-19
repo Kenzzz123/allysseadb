@@ -21,7 +21,7 @@ export default function Landing() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh]">
       <div className="text-center max-w-3xl mx-auto px-4">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 text-indigo-600 font-medium text-sm mb-8">
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-300 font-medium text-sm mb-8">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
@@ -29,14 +29,14 @@ export default function Landing() {
           Live Real-time Database
         </div>
         
-        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 mb-6">
+        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-6">
           Manage your game <br/>
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+          <span className="text-white">
             characters in real-time
           </span>
         </h1>
         
-        <p className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto">
+        <p className="text-xl text-neutral-400 mb-10 max-w-2xl mx-auto">
           The ultimate single-page application for game character database management. 
           Experience instant updates, live stat tracking, and collaborative admin tools.
         </p>
@@ -44,7 +44,7 @@ export default function Landing() {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <button
             onClick={loginWithGoogle}
-            className="w-full sm:w-auto px-8 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold text-lg transition-all transform hover:scale-105 hover:shadow-xl flex items-center justify-center gap-3"
+            className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-neutral-200 text-black rounded-xl font-semibold text-lg transition-all transform hover:scale-105 hover:shadow-xl flex items-center justify-center gap-3"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -56,12 +56,12 @@ export default function Landing() {
           </button>
         </div>
 
-        <div className="mt-8 max-w-sm mx-auto bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-900 mb-4">
+        <div className="mt-8 max-w-sm mx-auto bg-neutral-900 p-6 rounded-2xl shadow-sm border border-neutral-800">
+          <h3 className="text-lg font-bold text-white mb-4">
             {isResetting ? 'Reset Password' : 'Or use Email / Password'}
           </h3>
-          {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl">{error}</div>}
-          {success && <div className="mb-4 p-3 bg-emerald-50 text-emerald-600 text-sm rounded-xl">{success}</div>}
+          {error && <div className="mb-4 p-3 bg-red-900/30 text-red-400 text-sm rounded-xl border border-red-900/50">{error}</div>}
+          {success && <div className="mb-4 p-3 bg-emerald-900/30 text-emerald-400 text-sm rounded-xl border border-emerald-900/50">{success}</div>}
           
           <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
             <input 
@@ -70,7 +70,7 @@ export default function Landing() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email (e.g. admin@game.com)" 
               required 
-              className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500" 
+              className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none" 
             />
             {!isResetting && (
               <input 
@@ -79,7 +79,7 @@ export default function Landing() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password" 
                 required 
-                className="w-full px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500" 
+                className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none" 
               />
             )}
             
@@ -99,14 +99,14 @@ export default function Landing() {
                       } 
                       catch (err: any) { setError(err.message || 'Reset failed'); }
                     }}
-                    className="w-full py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
+                    className="w-full py-2 bg-indigo-500 text-white rounded-xl font-medium hover:bg-indigo-600"
                   >
                     Send Reset Link
                   </button>
                   <button 
                     type="button" 
                     onClick={() => { setIsResetting(false); setError(''); setSuccess(''); }}
-                    className="w-full py-2 bg-slate-100 text-slate-700 rounded-xl font-medium"
+                    className="w-full py-2 bg-neutral-800 text-neutral-300 rounded-xl font-medium hover:bg-neutral-700"
                   >
                     Back to Login
                   </button>
@@ -120,15 +120,15 @@ export default function Landing() {
                         try { setError(''); setSuccess(''); await loginWithEmail(email, password); } 
                         catch (err: any) { 
                           if (err.code === 'auth/operation-not-allowed') {
-                            setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
+                            setError('Email/Password login is not enabled.');
                           } else if (err.code === 'auth/invalid-credential') {
-                            setError("Invalid email or password. If you haven't created this account yet, please click 'Register' instead.");
+                            setError("Invalid email/password. Please Register if you haven't created one.");
                           } else {
                             setError(err.message || 'Login failed'); 
                           }
                         }
                       }}
-                      className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
+                      className="flex-1 py-2 bg-indigo-500 text-white rounded-xl font-medium hover:bg-indigo-600"
                     >
                       Login
                     </button>
@@ -138,13 +138,13 @@ export default function Landing() {
                         try { setError(''); setSuccess(''); await registerWithEmail(email, password); } 
                         catch (err: any) { 
                           if (err.code === 'auth/operation-not-allowed') {
-                            setError('Email/Password login is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method), or use Google Login.');
+                            setError('Email/Password login is not enabled.');
                           } else {
                             setError(err.message || 'Registration failed'); 
                           }
                         }
                       }}
-                      className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200"
+                      className="flex-1 py-2 bg-neutral-800 text-neutral-300 rounded-xl font-medium hover:bg-neutral-700"
                     >
                       Register
                     </button>
@@ -152,7 +152,7 @@ export default function Landing() {
                   <button 
                     type="button"
                     onClick={() => { setIsResetting(true); setError(''); setSuccess(''); }}
-                    className="text-sm text-indigo-600 hover:underline mt-2 text-center"
+                    className="text-sm text-neutral-400 hover:text-white mt-2 text-center transition-colors"
                   >
                     Forgot Password?
                   </button>
@@ -164,26 +164,26 @@ export default function Landing() {
       </div>
 
       <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto px-4">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mb-4">
+        <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-2xl shadow-sm">
+          <div className="w-12 h-12 bg-neutral-800 text-indigo-400 border border-neutral-700/50 rounded-xl flex items-center justify-center mb-4">
             <Zap className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900 mb-2">Instant Sync</h3>
-          <p className="text-slate-600">Every stat change, level up, and gold drop reflects instantly across all connected clients.</p>
+          <h3 className="text-lg font-bold text-white mb-2">Instant Sync</h3>
+          <p className="text-neutral-400">Every stat change, level up, and gold drop reflects instantly across all connected clients.</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center mb-4">
+        <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-2xl shadow-sm">
+          <div className="w-12 h-12 bg-neutral-800 text-emerald-400 border border-neutral-700/50 rounded-xl flex items-center justify-center mb-4">
             <Shield className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900 mb-2">Secure Roles</h3>
-          <p className="text-slate-600">Built-in player and admin roles with strict Firestore security rules protecting your data.</p>
+          <h3 className="text-lg font-bold text-white mb-2">Secure Roles</h3>
+          <p className="text-neutral-400">Built-in player and admin roles with strict Firestore security rules protecting your data.</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center mb-4">
+        <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-2xl shadow-sm">
+          <div className="w-12 h-12 bg-neutral-800 text-fuchsia-400 border border-neutral-700/50 rounded-xl flex items-center justify-center mb-4">
             <Gamepad2 className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900 mb-2">Live Analytics</h3>
-          <p className="text-slate-600">Watch the game economy and player progression unfold in real-time on the admin dashboard.</p>
+          <h3 className="text-lg font-bold text-white mb-2">Live Analytics</h3>
+          <p className="text-neutral-400">Watch the game economy and player progression unfold in real-time on the admin dashboard.</p>
         </div>
       </div>
     </div>

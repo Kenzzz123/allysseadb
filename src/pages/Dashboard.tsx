@@ -37,13 +37,13 @@ export default function Dashboard() {
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
       <div className="lg:col-span-3 space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-slate-900">Your Records</h1>
+          <h1 className="text-2xl font-bold text-white">Your Records</h1>
           <button 
             onClick={() => setIsCreating(true)}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors shadow-sm"
+            className="px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-500/10 active:scale-95 border border-indigo-400/20"
           >
             <Plus className="w-5 h-5" />
-            Create New
+            Create Record
           </button>
         </div>
 
@@ -51,7 +51,7 @@ export default function Dashboard() {
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-100"
+            className="bg-neutral-900 p-6 rounded-2xl shadow-sm border border-neutral-800"
           >
             <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-4">
               <input
@@ -59,16 +59,16 @@ export default function Dashboard() {
                 value={newCharName}
                 onChange={(e) => setNewCharName(e.target.value)}
                 placeholder="Enter record name..."
-                className="flex-1 px-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className="flex-1 px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none"
                 autoFocus
                 maxLength={50}
                 required
               />
               <div className="flex gap-2 w-full sm:w-auto">
-                <button type="submit" className="flex-1 sm:flex-none px-6 py-2 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800">
+                <button type="submit" className="flex-1 sm:flex-none px-8 py-2 bg-white text-black rounded-xl font-bold hover:bg-neutral-200 transition-all active:scale-95">
                   Save
                 </button>
-                <button type="button" onClick={() => setIsCreating(false)} className="flex-1 sm:flex-none px-6 py-2 bg-slate-100 text-slate-600 rounded-xl font-medium hover:bg-slate-200">
+                <button type="button" onClick={() => setIsCreating(false)} className="flex-1 sm:flex-none px-6 py-2 bg-neutral-800 text-neutral-300 rounded-xl font-medium hover:bg-neutral-700">
                   Cancel
                 </button>
               </div>
@@ -85,18 +85,18 @@ export default function Dashboard() {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 hover:shadow-xl transition-all group"
+                className="bg-neutral-900 rounded-3xl p-6 shadow-sm border border-neutral-800 hover:shadow-xl hover:border-neutral-700 transition-all group"
               >
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900">{char.name}</h3>
-                    <div className="text-sm text-slate-500 flex items-center gap-1 mt-1">
+                    <h3 className="text-xl font-bold text-white">{char.name}</h3>
+                    <div className="text-sm text-neutral-500 flex items-center gap-1 mt-1">
                       <Clock className="w-4 h-4" />
                       Updated {formatDistanceToNow(char.updatedAt)} ago
                     </div>
                   </div>
                   {!char.isSystem && (
-                    <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-lg">
+                    <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center text-indigo-400 font-bold text-lg border border-neutral-700/50">
                       Lv{char.stats?.level || 0}
                     </div>
                   )}
@@ -105,13 +105,13 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   {!char.isSystem && (
                     <>
-                      <div className="flex items-center gap-2 text-slate-700">
+                      <div className="flex items-center gap-2 text-neutral-300">
                         <Heart className="w-4 h-4 text-pink-500" />
                         <span className="font-medium">{char.stats?.karmaPoint || 0} Karma</span>
                       </div>
                     </>
                   )}
-                  <div className="flex items-center gap-2 text-slate-700">
+                  <div className="flex items-center gap-2 text-neutral-300">
                     <Coins className="w-4 h-4 text-yellow-500" />
                     <span className="font-medium">{(char.stats?.vela || 0).toLocaleString()} Vela</span>
                   </div>
@@ -120,9 +120,9 @@ export default function Dashboard() {
                 <div className="flex gap-2">
                   <Link 
                     to={`/character/${char.id}`}
-                    className="flex-1 text-center py-2 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 rounded-xl font-medium transition-colors"
+                    className="flex-1 text-center py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-all border border-neutral-700 group-hover:border-indigo-500/50"
                   >
-                    Edit Stats
+                    Manage Record
                   </Link>
                 </div>
               </motion.div>
@@ -130,13 +130,13 @@ export default function Dashboard() {
           </AnimatePresence>
           
           {characters.length === 0 && !isCreating && (
-            <div className="col-span-full py-12 text-center bg-white rounded-3xl border border-dashed border-slate-300">
-              <Gamepad2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900">No records yet</h3>
-              <p className="text-slate-500 mb-4">Create your first record to start your journey.</p>
+            <div className="col-span-full py-12 text-center bg-neutral-900 rounded-3xl border border-dashed border-neutral-800">
+              <Gamepad2 className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-white">No records yet</h3>
+              <p className="text-neutral-500 mb-4">Create your first record to start your journey.</p>
               <button 
                 onClick={() => setIsCreating(true)}
-                className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-medium hover:bg-indigo-100"
+                className="px-4 py-2 bg-indigo-500/10 text-indigo-400 rounded-xl font-medium hover:bg-indigo-500/20"
               >
                 Create Record
               </button>
@@ -146,30 +146,30 @@ export default function Dashboard() {
       </div>
 
       <div className="space-y-6">
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-indigo-500" />
+        <div className="bg-neutral-900 rounded-3xl p-6 shadow-sm border border-neutral-800">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-indigo-400" />
             Account Summary
           </h3>
           <div className="space-y-4">
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100">
-              <span className="text-slate-500">Total Records</span>
-              <span className="font-bold text-slate-900">{characters.length}</span>
+            <div className="flex justify-between items-center pb-4 border-b border-neutral-800">
+              <span className="text-neutral-500">Total Records</span>
+              <span className="font-bold text-white">{characters.length}</span>
             </div>
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100">
-              <span className="text-slate-500">Total Vela</span>
-              <span className="font-bold text-yellow-600">{totalVela.toLocaleString()} V</span>
+            <div className="flex justify-between items-center pb-4 border-b border-neutral-800">
+              <span className="text-neutral-500">Total Vela</span>
+              <span className="font-bold text-yellow-500">{totalVela.toLocaleString()} V</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-500">Average Level</span>
-              <span className="font-bold text-indigo-600">Lv {avgLevel}</span>
+              <span className="text-neutral-500">Average Level</span>
+              <span className="font-bold text-indigo-400">Lv {avgLevel}</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-          <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-emerald-500" />
+        <div className="bg-neutral-900 rounded-3xl p-6 shadow-sm border border-neutral-800">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-emerald-400" />
             Recent Activity
           </h3>
           <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
@@ -178,10 +178,10 @@ export default function Dashboard() {
               return (
                 <div key={log.id} className="text-sm">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-slate-900">{char?.name || 'Unknown'}</span>
-                    <span className="text-xs text-slate-400">{formatDistanceToNow(log.timestamp)} ago</span>
+                    <span className="font-medium text-white">{char?.name || 'Unknown'}</span>
+                    <span className="text-xs text-neutral-500">{formatDistanceToNow(log.timestamp)} ago</span>
                   </div>
-                  <div className="text-slate-600">
+                  <div className="text-neutral-400">
                     {log.action === 'CREATE' && 'Record created'}
                     {log.action === 'UPDATE' && 'Stats updated'}
                     {log.action === 'DELETE' && 'Record deleted'}
@@ -190,7 +190,7 @@ export default function Dashboard() {
               );
             })}
             {logs.length === 0 && (
-              <div className="text-sm text-slate-500 text-center py-4">No recent activity</div>
+              <div className="text-sm text-neutral-500 text-center py-4">No recent activity</div>
             )}
           </div>
         </div>
