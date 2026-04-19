@@ -298,23 +298,23 @@ export default function Transactions() {
                 >
                   <div className="flex items-center gap-3 text-white font-bold">
                     <div className="w-8 h-8 rounded-lg bg-black border border-neutral-800 flex items-center justify-center text-xs text-neutral-500 font-mono group-hover:border-indigo-500/30 transition-colors">
-                      {log.senderCharName.charAt(0)}
+                      {log.senderCharName?.charAt(0) || '?'}
                     </div>
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2">
-                        <span className={log.senderUserId === currentUser?.uid ? 'text-red-400' : 'text-emerald-400'}>{log.senderCharName}</span>
+                        <span className={log.senderUserId === currentUser?.uid ? 'text-red-400' : 'text-emerald-400'}>{log.senderCharName || 'Unknown'}</span>
                         <ArrowRightLeft className="w-3 h-3 text-neutral-600" />
-                        <span className={log.recipientUserId === currentUser?.uid ? 'text-emerald-400' : 'text-neutral-300'}>{log.recipientCharName}</span>
+                        <span className={log.recipientUserId === currentUser?.uid ? 'text-emerald-400' : 'text-neutral-300'}>{log.recipientCharName || 'Unknown'}</span>
                       </div>
                       <span className="text-[10px] text-neutral-600 font-mono tracking-tighter uppercase">{log.id}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className={`text-lg font-black font-mono ${log.senderUserId === currentUser?.uid ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {log.senderUserId === currentUser?.uid ? '-' : '+'}{log.amount.toLocaleString()}
+                      {log.senderUserId === currentUser?.uid ? '-' : '+'}{(log.amount || 0).toLocaleString()}
                     </div>
                     <div className="text-xs text-neutral-600">
-                      {formatDistanceToNow(log.timestamp)} ago
+                      {log.timestamp ? formatDistanceToNow(log.timestamp) : 'unknown'} ago
                     </div>
                   </div>
                 </div>
