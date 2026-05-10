@@ -29,7 +29,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'ferdinand262010@gmail.com' ||
+        (request.auth.token.email == 'ferdinand262010@gmail.com') ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
@@ -42,48 +42,49 @@ service cloud.firestore {
     // --- Validation Helpers ---
     
     function isValidUser(data) {
-      return (data.keys().hasAll(['username', 'role', 'lastSeen', 'online']) || data.keys().size() <= 6) &&
-             (!('username' in data) || (data.username is string && data.username.size() <= 50)) &&
-             (!('email' in data) || (data.email is string && data.email.size() <= 100)) &&
-             (!('role' in data) || (data.role in ['player', 'admin', 'system'])) &&
-             (!('createdAt' in data) || (data.createdAt is number)) &&
-             (!('lastSeen' in data) || (data.lastSeen is number)) &&
-             (!('online' in data) || (data.online is bool));
+      return data.keys().hasAll(['username', 'email', 'role', 'createdAt', 'lastSeen', 'online']) &&
+             data.keys().size() >= 6 &&
+             data.username is string && data.username.size() <= 50 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.role in ['player', 'admin', 'system'] &&
+             data.createdAt is number &&
+             data.lastSeen is number &&
+             data.online is bool;
     }
 
     function isValidCharacter(data) {
-      return (!('name' in data) || (data.name is string && data.name.size() <= 50)) &&
-             (!('stats' in data) || (data.stats is map && data.stats.keys().hasAll(['level', 'karmaPoint', 'vela', 'totalIncome', 'totalExpense']))) &&
-             (!('userId' in data) || (data.userId is string && data.userId.size() <= 128)) &&
-             (!('createdAt' in data) || (data.createdAt is number)) &&
-             (!('updatedAt' in data) || (data.updatedAt is number));
+      return data.keys().hasAll(['userId', 'name', 'stats', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.name is string && data.name.size() <= 50 &&
+             data.stats is map &&
+             data.stats.keys().hasAll(['level', 'hp', 'attack', 'defense', 'gold', 'experience']) &&
+             data.createdAt is number &&
+             data.updatedAt is number;
     }
 
     function isValidLog(data) {
-      return (data.keys().hasAll(['charId', 'userId', 'action', 'timestamp']) || data.keys().hasAll(['action', 'timestamp', 'userId'])) &&
-             (!('charId' in data) || (data.charId is string)) &&
-             (!('userId' in data) || (data.userId is string)) &&
-             (!('action' in data) || (data.action is string)) && 
-             (!('timestamp' in data) || (data.timestamp is number));
+      return data.keys().hasAll(['charId', 'userId', 'action', 'timestamp']) &&
+             data.charId is string && data.userId is string &&
+             data.action is string && data.timestamp is number;
     }
 
     function isValidTransaction(data) {
       return data.keys().hasAll(['senderCharId', 'senderCharName', 'senderUserId', 'recipientCharId', 'recipientCharName', 'recipientUserId', 'amount', 'reason', 'timestamp']) &&
-             data.amount is number;
+             data.amount is number && data.amount > 0;
     }
 
     // --- Collection Matches ---
 
     // Users
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
       allow create: if isOwner(userId) && isValidUser(incoming()) && 
-                    incoming().keys().hasAll(['username', 'email', 'role', 'createdAt', 'lastSeen', 'online']) &&
                     (incoming().role == 'player' || request.auth.token.email == 'ferdinand262010@gmail.com');
-      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(incoming()) && (
+      allow update: if (isOwner(userId) || isAdmin()) && (
         // Action: Update profile/online status
         (incoming().diff(existing()).affectedKeys().hasOnly(['username', 'lastSeen', 'online', 'role']) &&
-         (incoming().get('role', existing().role) == existing().role || isAdmin()))
+         (incoming().role == existing().role || isAdmin()))
       );
       allow delete: if isAdmin();
     }
@@ -91,12 +92,10 @@ service cloud.firestore {
     // Characters
     match /characters/{charId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidCharacter(incoming()) && 
-                    incoming().keys().hasAll(['userId', 'name', 'stats', 'createdAt', 'updatedAt']) &&
-                    incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && isValidCharacter(incoming()) && (
+      allow create: if isSignedIn() && isValidCharacter(incoming()) && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (
         isAdmin() || 
-        (existing().userId == request.auth.uid && incoming().get('userId', request.auth.uid) == request.auth.uid && (
+        (existing().userId == request.auth.uid && incoming().userId == request.auth.uid && (
           // Action: Rename or update pin
           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pin', 'updatedAt']) ||
           // Action: Update stats
@@ -104,7 +103,7 @@ service cloud.firestore {
         )) ||
         // Action: Global transfer (updates recipient)
         (incoming().diff(existing()).affectedKeys().hasOnly(['stats', 'updatedAt', 'lastSeen']) && 
-         incoming().get('userId', existing().userId) == existing().userId)
+         incoming().userId == existing().userId)
       );
       allow delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
     }

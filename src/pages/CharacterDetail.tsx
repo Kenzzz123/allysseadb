@@ -1,18 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useData, CharacterStats } from '../contexts/DataContext';
-import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield, Edit2, Check, X } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield, Edit2, Check, X, Download } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
 
 export default function CharacterDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { characters, allCharacters, updateCharacter, renameCharacter, deleteCharacter, logs, allLogs } = useData();
+  const { userProfile, characters, allCharacters, updateCharacter, renameCharacter, deleteCharacter, logs, allLogs } = useData();
   
   // Find character in user's characters or all characters (if admin)
   const character = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
-  const charLogs = (logs.length > 0 ? logs : allLogs).filter(l => l.charId === id).sort((a, b) => b.timestamp - a.timestamp);
+  const { allUsers } = useData();
+  const ownerProfile = allUsers.find(u => u.id === character?.userId);
+  const isAdmin = userProfile?.role === 'admin';
+  const [charLogs, setCharLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!id) return;
+    
+    let unsub = () => {};
+    
+    import('firebase/firestore').then(({ collection, query, where, orderBy, limit, onSnapshot }) => {
+      const q = query(
+        collection(db, 'logs'),
+        where('charId', '==', id),
+        orderBy('timestamp', 'desc'),
+        limit(100)
+      );
+      
+      unsub = onSnapshot(q, (snap) => {
+        setCharLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+    });
+
+    return () => unsub();
+  }, [id]);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState('');
@@ -77,10 +102,21 @@ export default function CharacterDetail() {
         return isNaN(parsed) ? 0 : parsed;
       };
 
-      if (addStats.level) newStats.level = (newStats.level || 0) + parseAdd(addStats.level);
-      if (addStats.karmaPoint) newStats.karmaPoint = (newStats.karmaPoint || 0) + parseAdd(addStats.karmaPoint);
-      if (addStats.totalIncome) newStats.totalIncome = (newStats.totalIncome || 0) + parseAdd(addStats.totalIncome);
-      if (addStats.totalExpense) newStats.totalExpense = (newStats.totalExpense || 0) + parseAdd(addStats.totalExpense);
+      if (character.isSystem) {
+        if (addStats.vela) {
+          const adj = parseAdd(addStats.vela);
+          if (adj > 0) {
+            newStats.totalIncome = (newStats.totalIncome || 0) + adj;
+          } else if (adj < 0) {
+            newStats.totalExpense = (newStats.totalExpense || 0) + Math.abs(adj);
+          }
+        }
+      } else {
+        if (addStats.level) newStats.level = (newStats.level || 0) + parseAdd(addStats.level);
+        if (addStats.karmaPoint) newStats.karmaPoint = (newStats.karmaPoint || 0) + parseAdd(addStats.karmaPoint);
+        if (addStats.totalIncome) newStats.totalIncome = (newStats.totalIncome || 0) + parseAdd(addStats.totalIncome);
+        if (addStats.totalExpense) newStats.totalExpense = (newStats.totalExpense || 0) + parseAdd(addStats.totalExpense);
+      }
       
       // Auto-calculate Vela
       newStats.vela = (newStats.totalIncome || 0) - (newStats.totalExpense || 0);
@@ -231,6 +267,12 @@ export default function CharacterDetail() {
               </div>
             )}
 
+            {isAdmin && (
+              <div className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-md mb-2">
+                Owner: {ownerProfile?.email || (character.isSystem ? 'system@game.com' : 'Unknown Email')}
+              </div>
+            )}
+
             {!character.isSystem && (
               <p className="text-neutral-500 mt-1">Level {character.stats?.level || 0}</p>
             )}
@@ -249,22 +291,14 @@ export default function CharacterDetail() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {[
-                { key: 'level', label: 'Level', hideSystem: true },
-                { key: 'karmaPoint', label: 'Karma Point', hideSystem: true },
-                { key: 'totalIncome', label: 'Total Income' },
-                { key: 'totalExpense', label: 'Total Expense' },
-              ].filter(stat => !(character.isSystem && stat.hideSystem)).map(stat => {
-                const currentVal = character.stats[stat.key as keyof CharacterStats] || 0;
-                const addVal = addStats[stat.key as keyof CharacterStats] !== undefined ? addStats[stat.key as keyof CharacterStats] : '';
-                return (
-                  <div key={stat.key} className="space-y-2">
+              {character.isSystem ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
                     <label className="flex justify-between text-sm font-medium text-neutral-400 capitalize">
-                      {stat.label} (Current: {currentVal})
-                      {addVal !== 0 && addVal !== '' && addVal !== '-' && (
+                      Vela Adjustment (Current: {character.stats.vela.toLocaleString()})
+                      {addStats.vela !== 0 && addStats.vela !== '' && addStats.vela !== '-' && (
                         <span className="text-indigo-600 font-bold">
-                          {renderDiff(currentVal, currentVal + parseInt(addVal as string))}
+                          {renderDiff(character.stats.vela, character.stats.vela + parseInt(addStats.vela as string))}
                         </span>
                       )}
                     </label>
@@ -274,26 +308,71 @@ export default function CharacterDetail() {
                       </div>
                       <input
                         type="text"
-                        value={addVal}
+                        value={addStats.vela}
                         onChange={(e) => {
                           const val = e.target.value;
                           if (val === '' || val === '-' || /^-?\d+$/.test(val)) {
-                            handleAddChange(stat.key, val);
+                            handleAddChange('vela', val);
                           }
                         }}
                         placeholder="0 (use - to subtract)"
                         className="w-full bg-black text-white pl-10 pr-4 py-2 border border-neutral-800 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none transition-all font-mono text-lg"
                       />
                     </div>
-                    {addVal !== 0 && addVal !== '' && addVal !== '-' && (
+                    {addStats.vela !== 0 && addStats.vela !== '' && addStats.vela !== '-' && (
                       <div className="text-xs text-neutral-500 text-right">
-                        New total: <span className="font-bold text-white">{currentVal + parseInt(addVal as string)}</span>
+                        New total: <span className="font-bold text-white">{(character.stats.vela + parseInt(addStats.vela as string)).toLocaleString()}</span>
                       </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {[
+                    { key: 'level', label: 'Level' },
+                    { key: 'karmaPoint', label: 'Karma Point' },
+                    { key: 'totalIncome', label: 'Total Income' },
+                    { key: 'totalExpense', label: 'Total Expense' },
+                  ].map(stat => {
+                    const currentVal = (character.stats as any)[stat.key] || 0;
+                    const addVal = addStats[stat.key as keyof CharacterStats] !== undefined ? addStats[stat.key as keyof CharacterStats] : '';
+                    return (
+                      <div key={stat.key} className="space-y-2">
+                        <label className="flex justify-between text-sm font-medium text-neutral-400 capitalize">
+                          {stat.label} (Current: {currentVal})
+                          {addVal !== 0 && addVal !== '' && addVal !== '-' && (
+                            <span className="text-indigo-600 font-bold">
+                              {renderDiff(currentVal, currentVal + parseInt(addVal as string))}
+                            </span>
+                          )}
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <span className="text-neutral-500 font-medium">+/-</span>
+                          </div>
+                          <input
+                            type="text"
+                            value={addVal}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '' || val === '-' || /^-?\d+$/.test(val)) {
+                                handleAddChange(stat.key, val);
+                              }
+                            }}
+                            placeholder="0 (use - to subtract)"
+                            className="w-full bg-black text-white pl-10 pr-4 py-2 border border-neutral-800 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none transition-all font-mono text-lg"
+                          />
+                        </div>
+                        {addVal !== 0 && addVal !== '' && addVal !== '-' && (
+                          <div className="text-xs text-neutral-500 text-right">
+                            New total: <span className="font-bold text-white">{currentVal + parseInt(addVal as string)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
             {hasChanges && (
               <div className="mt-6 space-y-4 border-t border-neutral-800 pt-6">
@@ -398,10 +477,31 @@ export default function CharacterDetail() {
       )}
 
       <div className="bg-neutral-900 rounded-3xl p-8 shadow-sm border border-neutral-800">
-        <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-          <History className="w-5 h-5 text-indigo-400" />
-          Change History
-        </h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <History className="w-5 h-5 text-indigo-400" />
+            Character Log History {isAdmin && <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded ml-2">ADMIN VIEW (ALL HISTORY)</span>}
+          </h2>
+          {isAdmin && (
+            <button 
+              onClick={() => {
+                const csv = [
+                  ['Log ID', 'Action', 'Performer', 'Date', 'Reason'].join(','),
+                  ...charLogs.map(l => [l.id, l.action, l.username || 'System', new Date(l.timestamp).toLocaleString().replace(/,/g, ''), (l.reason || '').replace(/,/g, '')].join(','))
+                ].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `logs_${character.name}_${character.id}.csv`;
+                a.click();
+              }}
+              className="text-xs text-neutral-400 hover:text-white transition-colors flex items-center gap-1"
+            >
+              <Download className="w-3 h-3" /> Export Logs
+            </button>
+          )}
+        </div>
         
         <div className="space-y-6">
           {charLogs.map(log => (
@@ -417,7 +517,7 @@ export default function CharacterDetail() {
               <div className="flex-1">
                 <div className="flex justify-between items-start mb-2">
                   <span className={`font-medium ${log.action === 'UPDATE BY ADMIN' ? 'text-purple-400' : 'text-white'}`}>
-                    {log.action === 'CREATE' ? 'Record Created' : log.action === 'UPDATE BY ADMIN' ? 'Updated by Admin' : 'Stats Updated'}
+                    {log.action === 'CREATE' ? 'Record Created' : log.action === 'UPDATE BY ADMIN' ? `Updated by Admin (${log.username || 'System'})` : 'Stats Updated'}
                   </span>
                   <span className="text-sm text-neutral-500">{formatDistanceToNow(log.timestamp)} ago</span>
                 </div>

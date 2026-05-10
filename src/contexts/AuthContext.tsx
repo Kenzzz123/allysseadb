@@ -10,8 +10,55 @@ import {
   sendPasswordResetEmail,
   getRedirectResult
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, getDocFromServer } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../lib/firebase';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export interface UserProfile {
   username: string;
@@ -48,6 +95,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Connection test
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    };
+    testConnection();
+
     // Check for redirect result on mount
     getRedirectResult(auth).then(async (result) => {
       if (result?.user?.email) {
@@ -83,16 +142,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const docSnap = await getDoc(userRef);
             if (!docSnap.exists()) {
-              const isAdmin = user.email === 'ferdinand262010@gmail.com';
+              const isAdminEmail = user.email === 'ferdinand262010@gmail.com';
               const newProfile: UserProfile = {
                 username: user.displayName || user.email?.split('@')[0] || 'Player',
                 email: user.email || '',
-                role: isAdmin ? 'admin' : 'player',
+                role: isAdminEmail ? 'admin' : 'player',
                 createdAt: Date.now(),
                 lastSeen: Date.now(),
                 online: true,
               };
-              await setDoc(userRef, newProfile);
+              await setDoc(userRef, newProfile).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`));
             } else {
               const data = docSnap.data();
               const updates: any = { lastSeen: Date.now(), online: true };
@@ -102,10 +161,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (!data?.username) {
                 updates.username = user.displayName || user.email?.split('@')[0] || 'Player';
               }
-              await setDoc(userRef, updates, { merge: true });
+              await setDoc(userRef, updates, { merge: true }).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`));
             }
           } catch (err) {
             console.error("Error initializing user profile:", err);
+            // If it was already handled by handleFirestoreError, it will re-throw anyway
           }
 
           // Set up real-time listener for user profile
@@ -132,10 +192,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               try {
                 await setDoc(userRef, { 
                   online: isOnline, 
-                  lastSeen: serverTimestamp() 
+                  lastSeen: Date.now() 
                 }, { merge: true });
               } catch (err) {
-                console.error("Error updating status:", err);
+                handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
               }
             }, 3000); // 3 second debounce
           };

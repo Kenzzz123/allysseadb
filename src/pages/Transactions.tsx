@@ -177,7 +177,7 @@ export default function Transactions() {
 
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-neutral-400 mb-1">To Character (Search by Name)</label>
+                      <label className="block text-sm font-medium text-neutral-400 mb-1">To Character (Search by Name/ID/Email)</label>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                           <Search className="h-5 w-5 text-neutral-500" />
@@ -187,12 +187,12 @@ export default function Transactions() {
                           value={searchQuery}
                           onChange={(e) => handleSearchRecipient(e.target.value)}
                           className="w-full pl-10 pr-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none"
-                          placeholder="Type character name..."
+                          placeholder="Type name, ID, or email..."
                         />
                       </div>
                       
                       {searchResults.length > 0 && (
-                        <div className="mt-2 border border-neutral-800 rounded-xl overflow-hidden bg-black shadow-sm">
+                        <div className="mt-2 border border-neutral-800 rounded-xl overflow-hidden bg-black shadow-sm max-h-48 overflow-y-auto">
                           {searchResults.map(res => (
                             <div 
                               key={res.id}
@@ -201,10 +201,13 @@ export default function Transactions() {
                                 setSearchQuery(res.name);
                                 setSearchResults([]);
                               }}
-                              className={`px-4 py-2 cursor-pointer hover:bg-neutral-800 flex justify-between items-center ${recipientId === res.id ? 'bg-indigo-500/10' : ''}`}
+                              className={`px-4 py-2 cursor-pointer hover:bg-neutral-800 flex justify-between items-center border-b border-neutral-900 last:border-0 ${recipientId === res.id ? 'bg-indigo-500/10' : ''}`}
                             >
-                              <span className="font-medium text-white">{res.name}</span>
-                              <span className="text-xs text-neutral-500 font-mono">{res.id.slice(0, 8)}...</span>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-white">{res.name}</span>
+                                {res.userId && <span className="text-[10px] text-neutral-500">ID: {res.id.slice(0, 10)}...</span>}
+                              </div>
+                              <span className="text-[10px] text-neutral-600 font-mono italic">Select</span>
                             </div>
                           ))}
                         </div>

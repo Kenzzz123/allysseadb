@@ -31,7 +31,10 @@ export default function Dashboard() {
   }, [characters]);
 
   const totalVela = useMemo(() => characters.reduce((sum, c) => sum + (c.stats?.vela || 0), 0), [characters]);
-  const avgLevel = useMemo(() => characters.length ? Math.round(characters.reduce((sum, c) => sum + (c.stats?.level || 0), 0) / characters.length) : 0, [characters]);
+  const avgLevel = useMemo(() => {
+    const playerChars = characters.filter(c => !c.isSystem);
+    return playerChars.length ? Math.round(playerChars.reduce((sum, c) => sum + (c.stats?.level || 0), 0) / playerChars.length) : 0;
+  }, [characters]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">

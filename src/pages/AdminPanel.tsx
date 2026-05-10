@@ -311,6 +311,7 @@ export default function AdminPanel() {
                   <tbody className="text-sm">
                     {(filteredCharacters || []).map(char => {
                       const owner = (allUsers || []).find(u => u.id === char.userId);
+                      const displayEmail = owner?.email || (char.isSystem ? 'system@game.com' : (allUsers.length >= 1000 ? 'Click Detail to View' : 'Unknown Profile'));
                       return (
                         <tr key={char.id} className="border-b border-neutral-800 hover:bg-neutral-800/50 transition-colors">
                           <td className="p-4 font-bold text-white">
@@ -319,8 +320,11 @@ export default function AdminPanel() {
                             </Link>
                           </td>
                           <td className="p-4">
-                            <div className="font-medium text-white">{owner?.username || 'Unknown'}</div>
-                            <div className="text-neutral-500 font-mono text-xs" title={char.userId}>{char.userId?.slice(0, 8) || 'unknown'}...</div>
+                            <div className="font-medium text-white">{owner?.username || (char.isSystem ? 'System Account' : 'Unknown')}</div>
+                            <div className="text-neutral-500 font-mono text-xs flex flex-col gap-1">
+                              <span title={char.userId}>{char.userId?.slice(0, 8) || 'unknown'}...</span>
+                              <span className="text-[10px] text-neutral-600 italic">({displayEmail})</span>
+                            </div>
                           </td>
                           <td className="p-4">
                             <span className="px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-md font-medium">Lv {char.stats?.level || 0}</span>

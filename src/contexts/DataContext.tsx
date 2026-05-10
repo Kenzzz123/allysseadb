@@ -2,6 +2,54 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
+import { auth } from '../lib/firebase';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export interface CharacterStats {
   level: number;
@@ -154,17 +202,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!queryStr || queryStr.length < 2) return [];
     try {
       const { getDocs } = await import('firebase/firestore');
-      // Case-insensitive search is hard in Firestore, 
-      // simple implementation using range query
-      const q = query(
+      
+      const qByName = query(
         collection(db, 'characters'),
-        where('isSystem', '==', false),
         where('name', '>=', queryStr),
         where('name', '<=', queryStr + '\uf8ff'),
         limit(10)
       );
-      const snap = await getDocs(q);
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
+      
+      // Also try searching by ID directly if it looks like one
+      const qById = query(
+        collection(db, 'characters'),
+        where('__name__', '>=', queryStr),
+        where('__name__', '<=', queryStr + '\uf8ff'),
+        limit(5)
+      );
+
+      const [nameSnap, idSnap] = await Promise.all([getDocs(qByName), getDocs(qById)]);
+      
+      const resultsMap = new Map<string, Character>();
+      nameSnap.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() } as Character));
+      idSnap.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() } as Character));
+      
+      return Array.from(resultsMap.values());
     } catch (err) {
       console.error("Search characters error:", err);
       return [];
@@ -195,7 +255,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
       setLogs(logsData);
     }, (error) => {
-      console.error("Logs listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'logs');
     });
 
     // Listen to user's transactions (where user is sender or recipient)
@@ -208,19 +268,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const sorted = Array.from(userTransMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         setTransactions(sorted);
       };
-
     const unsubTransSender = onSnapshot(qTransSender, (snapshot) => {
       snapshot.docs.forEach(doc => userTransMap.set(doc.id, { id: doc.id, ...doc.data() } as Transaction));
       updateTrans();
     }, (error) => {
-      console.error("TransSender listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'transactions');
     });
     
     const unsubTransRecipient = onSnapshot(qTransRecipient, (snapshot) => {
       snapshot.docs.forEach(doc => userTransMap.set(doc.id, { id: doc.id, ...doc.data() } as Transaction));
       updateTrans();
     }, (error) => {
-      console.error("TransRecipient listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'transactions');
     });
 
     let unsubAllChars = () => {};
@@ -231,37 +290,36 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // If admin, listen to all logs, users, and transactions
     if (userProfile?.role === 'admin') {
-      const qAllChars = query(collection(db, 'characters'), limit(200));
+      const qAllChars = query(collection(db, 'characters'), limit(2000));
       unsubAllChars = onSnapshot(qAllChars, (snapshot) => {
         const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
         setAllCharacters(charsData);
       }, (error) => {
-        console.error("AllChars listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, 'characters');
       });
 
-      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(100)); // Reduced limit to 100
+      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(1000));
       unsubAllLogs = onSnapshot(qAllLogs, (snapshot) => {
         const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
         setAllLogs(logsData);
       }, (error) => {
-        console.error("All Logs listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, 'logs');
       });
 
-      const qAllUsers = query(collection(db, 'users'), limit(100));
+      const qAllUsers = query(collection(db, 'users'), limit(1000));
       unsubAllUsers = onSnapshot(qAllUsers, (snapshot) => {
         const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAllUsers(usersData);
       }, (error) => {
-        console.error("AllUsers listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, 'users');
       });
 
-      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(200));
+      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(1000));
       unsubAllTrans = onSnapshot(qAllTrans, (snapshot) => {
         const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-        // No need to sort manually if we use orderBy in the query
         setAllTransactions(transData);
       }, (error) => {
-        console.error("AllTrans listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, 'transactions');
       });
 
       const qWarnings = query(collection(db, 'admin_warnings'), orderBy('timestamp', 'desc'), limit(50));
@@ -269,7 +327,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const warningsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminWarning));
         setAdminWarnings(warningsData);
       }, (error) => {
-        console.error("AdminWarnings listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, 'admin_warnings');
       });
     }
 
