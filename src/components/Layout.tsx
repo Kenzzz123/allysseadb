@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useData } from '../contexts/DataContext';
 import { LogOut, User, Shield, Bell, Search, Settings, ArrowRightLeft, Trophy } from 'lucide-react';
 import SettingsModal from './SettingsModal';
 
 export default function Layout() {
   const { currentUser, userProfile, logout } = useAuth();
+  const { adminWarnings } = useData();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const isAdminPage = location.pathname === '/admin';
+  const hasAlerts = userProfile?.role === 'admin' && adminWarnings?.length > 0;
 
   const handleLogout = async () => {
     await logout();
@@ -57,14 +60,28 @@ export default function Layout() {
                   <Link to="/transactions" className="p-2 text-neutral-400 hover:text-white transition-colors" title="Transactions">
                     <ArrowRightLeft className="h-5 w-5" />
                   </Link>
-                  <button className="p-2 text-neutral-400 hover:text-white relative">
+                  <button 
+                    onClick={() => userProfile?.role === 'admin' ? navigate('/admin?tab=alerts') : null}
+                    className={`p-2 transition-colors relative ${hasAlerts ? 'text-red-500' : 'text-neutral-400 hover:text-white'}`}
+                  >
                     <Bell className="h-6 w-6" />
+                    {hasAlerts && (
+                      <span className="absolute top-1 right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                      </span>
+                    )}
                   </button>
                   
                   {userProfile?.role === 'admin' && (
-                    <Link to={isAdminPage ? "/dashboard" : "/admin"} className="p-2 text-white hover:bg-neutral-800 bg-neutral-900 border border-neutral-800 rounded-lg flex items-center gap-2 transition-colors">
-                      <Shield className="h-5 w-5 text-emerald-400" />
+                    <Link to={isAdminPage ? "/dashboard" : "/admin"} className={`p-2 transition-colors border border-neutral-800 rounded-lg flex items-center gap-2 ${hasAlerts && !isAdminPage ? 'bg-red-500/10 border-red-500/30' : 'bg-neutral-900 hover:bg-neutral-800'}`}>
+                      <Shield className={`h-5 w-5 ${hasAlerts ? 'text-red-500' : 'text-emerald-400'}`} />
                       <span className="text-sm font-medium hidden sm:block">{isAdminPage ? 'Dashboard' : 'Admin'}</span>
+                      {hasAlerts && !isAdminPage && (
+                        <span className="bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                          {adminWarnings.length}
+                        </span>
+                      )}
                     </Link>
                   )}
 

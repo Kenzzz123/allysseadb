@@ -54,5 +54,11 @@ service cloud.firestore {
       allow get: if true; // Allow anyone to check if a specific email is banned (but not list all)
       allow read, write: if isAdmin();
     }
+
+    // Admin Warnings
+    match /admin_warnings/{warningId} {
+      allow read, write: if isAdmin();
+      allow create: if isAuthenticated(); // Allow users to trigger warnings via behavior (managed by app logic)
+    }
   }
 }

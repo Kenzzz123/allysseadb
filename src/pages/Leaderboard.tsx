@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
 import { useData } from '../contexts/DataContext';
-import { Trophy, Medal, Award, Star } from 'lucide-react';
+import { Trophy, Medal, Award, Star, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Leaderboard() {
-  const { allCharacters } = useData();
+  const { topVela, topLevel, refreshLeaderboard } = useData();
   const [activeTab, setActiveTab] = useState<'vela' | 'level'>('vela');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Filter out system characters
-  const eligibleCharacters = allCharacters.filter(c => !c.isSystem);
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshLeaderboard();
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
 
-  const velaLeaderboard = [...eligibleCharacters].sort((a, b) => (b.stats?.vela || 0) - (a.stats?.vela || 0));
-  const levelLeaderboard = [...eligibleCharacters].sort((a, b) => (b.stats?.level || 0) - (a.stats?.level || 0));
-
-  const currentList = activeTab === 'vela' ? velaLeaderboard : levelLeaderboard;
+  const currentList = activeTab === 'vela' ? topVela : topLevel;
 
   const getRankLabel = (index: number) => {
     if (index === 0) return '1st';
@@ -41,26 +42,36 @@ export default function Leaderboard() {
         </p>
       </div>
 
-      <div className="bg-neutral-900 rounded-3xl p-2 shadow-sm border border-neutral-800 flex">
+      <div className="bg-neutral-900 rounded-3xl p-2 shadow-sm border border-neutral-800 flex items-center gap-2">
+        <div className="flex-1 flex">
+          <button
+            onClick={() => setActiveTab('vela')}
+            className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
+              activeTab === 'vela' 
+                ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' 
+                : 'text-neutral-500 hover:bg-black hover:text-white'
+            }`}
+          >
+            Top Wealth (Vela)
+          </button>
+          <button
+            onClick={() => setActiveTab('level')}
+            className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
+              activeTab === 'level' 
+                ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' 
+                : 'text-neutral-500 hover:bg-black hover:text-white'
+            }`}
+          >
+            Top Level
+          </button>
+        </div>
         <button
-          onClick={() => setActiveTab('vela')}
-          className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
-            activeTab === 'vela' 
-              ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' 
-              : 'text-neutral-500 hover:bg-black hover:text-white'
-          }`}
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="p-3 bg-black/50 text-neutral-400 hover:text-indigo-400 rounded-2xl transition-all disabled:opacity-50"
+          title="Refresh"
         >
-          Top Wealth (Vela)
-        </button>
-        <button
-          onClick={() => setActiveTab('level')}
-          className={`flex-1 py-3 rounded-2xl font-bold text-sm transition-all ${
-            activeTab === 'level' 
-              ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' 
-              : 'text-neutral-500 hover:bg-black hover:text-white'
-          }`}
-        >
-          Top Level
+          <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
@@ -99,7 +110,7 @@ export default function Leaderboard() {
                     index === 2 ? 'bg-amber-600 text-white' :
                     'bg-neutral-800 text-neutral-400'
                   }`}>
-                    {char.name.charAt(0).toUpperCase()}
+                    {(char.name || '?').charAt(0).toUpperCase()}
                   </div>
                   <div>
                     <div className="font-bold text-white flex items-center gap-2">

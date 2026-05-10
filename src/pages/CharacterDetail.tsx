@@ -191,7 +191,7 @@ export default function CharacterDetail() {
         <div className="flex flex-col md:flex-row gap-8 items-start">
           <div className="w-full md:w-1/3 flex flex-col items-center text-center">
             <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-3xl sm:text-4xl font-bold shadow-lg shadow-indigo-500/20 mb-4">
-              {character.name.charAt(0).toUpperCase()}
+              {(character.name || '?').charAt(0).toUpperCase()}
             </div>
             
             {isEditingName ? (

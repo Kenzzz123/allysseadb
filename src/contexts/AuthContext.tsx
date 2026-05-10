@@ -64,89 +64,99 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user?.email) {
-        const bannedDoc = await getDoc(doc(db, 'banned_emails', user.email));
-        if (bannedDoc.exists()) {
-          setCurrentUser(null);
-          await signOut(auth);
-          setLoading(false);
-          return;
+      try {
+        if (user?.email) {
+          const bannedDoc = await getDoc(doc(db, 'banned_emails', user.email));
+          if (bannedDoc.exists()) {
+            setCurrentUser(null);
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
         }
-      }
-      
-      setCurrentUser(user);
-      if (user) {
-        const userRef = doc(db, 'users', user.uid);
         
-        // First check if doc exists to avoid race condition
-        try {
-          const docSnap = await getDoc(userRef);
-          if (!docSnap.exists()) {
-            const isAdmin = user.email === 'ferdinand262010@gmail.com';
-            const newProfile: UserProfile = {
-              username: user.displayName || user.email?.split('@')[0] || 'Player',
-              email: user.email || '',
-              role: isAdmin ? 'admin' : 'player',
-              createdAt: Date.now(),
-              lastSeen: Date.now(),
-              online: true,
-            };
-            await setDoc(userRef, newProfile);
-          } else {
-            const data = docSnap.data();
-            const updates: any = { lastSeen: Date.now(), online: true };
-            // Fix corrupted profiles that might be missing fields due to previous race condition
-            if (!data.role) {
-              updates.role = user.email === 'ferdinand262010@gmail.com' ? 'admin' : 'player';
+        setCurrentUser(user);
+        if (user) {
+          const userRef = doc(db, 'users', user.uid);
+          
+          // First check if doc exists to avoid race condition
+          try {
+            const docSnap = await getDoc(userRef);
+            if (!docSnap.exists()) {
+              const isAdmin = user.email === 'ferdinand262010@gmail.com';
+              const newProfile: UserProfile = {
+                username: user.displayName || user.email?.split('@')[0] || 'Player',
+                email: user.email || '',
+                role: isAdmin ? 'admin' : 'player',
+                createdAt: Date.now(),
+                lastSeen: Date.now(),
+                online: true,
+              };
+              await setDoc(userRef, newProfile);
+            } else {
+              const data = docSnap.data();
+              const updates: any = { lastSeen: Date.now(), online: true };
+              if (!data?.role) {
+                updates.role = user.email === 'ferdinand262010@gmail.com' ? 'admin' : 'player';
+              }
+              if (!data?.username) {
+                updates.username = user.displayName || user.email?.split('@')[0] || 'Player';
+              }
+              await setDoc(userRef, updates, { merge: true });
             }
-            if (!data.username) {
-              updates.username = user.displayName || user.email?.split('@')[0] || 'Player';
+          } catch (err) {
+            console.error("Error initializing user profile:", err);
+          }
+
+          // Set up real-time listener for user profile
+          const unsubProfile = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+              setUserProfile(docSnap.data() as UserProfile);
             }
-            await setDoc(userRef, updates, { merge: true });
-          }
-        } catch (err) {
-          console.error("Error initializing user profile:", err);
-        }
+            setLoading(false);
+          }, (err) => {
+            console.error("Profile snapshot error:", err);
+            setLoading(false);
+          });
 
-        // Set up real-time listener for user profile
-        const unsubProfile = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setUserProfile(docSnap.data() as UserProfile);
-          }
-          setLoading(false);
-        });
+          // Handle offline status on disconnect with throttling/debouncing
+          let statusTimeout: NodeJS.Timeout | null = null;
+          const updateOnlineStatus = (isOnline: boolean) => {
+            if (statusTimeout) clearTimeout(statusTimeout);
+            
+            // Debounce the update to avoid spamming writes on rapid tab switching
+            statusTimeout = setTimeout(async () => {
+              // Only update if the status is actually changed or if it's been a while
+              // But we don't easily have the current actual DB value without a fetch
+              // So we rely on the debounce to at least stop rapid changes.
+              try {
+                await setDoc(userRef, { 
+                  online: isOnline, 
+                  lastSeen: serverTimestamp() 
+                }, { merge: true });
+              } catch (err) {
+                console.error("Error updating status:", err);
+              }
+            }, 3000); // 3 second debounce
+          };
 
-        // Handle offline status on disconnect or tab hide
-        const updateOnlineStatus = (isOnline: boolean) => {
-          setDoc(userRef, { online: isOnline, lastSeen: Date.now() }, { merge: true }).catch(console.error);
-        };
+          const handleVisibilityChange = () => {
+            updateOnlineStatus(document.visibilityState === 'visible');
+          };
 
-        const handleVisibilityChange = () => {
-          if (document.visibilityState === 'visible') {
-            updateOnlineStatus(true);
-          } else {
+          document.addEventListener('visibilitychange', handleVisibilityChange);
+
+          return () => {
+            unsubProfile();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             updateOnlineStatus(false);
-          }
-        };
-
-        const handlePageHide = () => {
-          updateOnlineStatus(false);
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('pagehide', handlePageHide);
-        window.addEventListener('beforeunload', handlePageHide);
-
-        return () => {
-          unsubProfile();
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
-          window.removeEventListener('pagehide', handlePageHide);
-          window.removeEventListener('beforeunload', handlePageHide);
-          // Set offline when unmounting
-          updateOnlineStatus(false);
-        };
-      } else {
-        setUserProfile(null);
+          };
+        } else {
+          setUserProfile(null);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Auth state change error:", error);
         setLoading(false);
       }
     });

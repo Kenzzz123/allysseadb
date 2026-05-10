@@ -72,6 +72,22 @@
         "timestamp": { "type": "number", "description": "Timestamp of the transaction" }
       },
       "required": ["senderCharId", "senderCharName", "senderUserId", "recipientCharId", "recipientCharName", "recipientUserId", "amount", "reason", "timestamp"]
+    },
+    "AdminWarning": {
+      "title": "Admin Warning",
+      "description": "A warning for administrative monitoring",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "charId": { "type": "string" },
+        "charName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Vela", "Level"] },
+        "amount": { "type": "number" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["userId", "userEmail", "charId", "charName", "type", "amount", "message", "timestamp"]
     }
   },
   "firestore": {
@@ -90,6 +106,10 @@
     "/transactions/{transactionId}": {
       "schema": { "$ref": "#/entities/Transaction" },
       "description": "Stores transactions between characters"
+    },
+    "/admin_warnings/{warningId}": {
+      "schema": { "$ref": "#/entities/AdminWarning" },
+      "description": "Stores abuse warnings for admins"
     },
     "/banned_emails/{email}": {
       "schema": {

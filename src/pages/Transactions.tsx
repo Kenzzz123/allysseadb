@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export default function Transactions() {
   const { userProfile, currentUser } = useAuth();
-  const { characters, allCharacters, transactions, allTransactions, createTransaction } = useData();
+  const { characters, allCharacters, transactions, allTransactions, createTransaction, searchCharacters } = useData();
   
   const [isTransferring, setIsTransferring] = useState(false);
   const [senderId, setSenderId] = useState('');
@@ -26,18 +26,15 @@ export default function Transactions() {
 
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
-  const handleSearchRecipient = (queryStr: string) => {
+  const handleSearchRecipient = async (queryStr: string) => {
     setSearchQuery(queryStr);
     if (queryStr.length < 2) {
       setSearchResults([]);
       return;
     }
     
-    const results = allCharacters.filter(c => 
-      c.name.toLowerCase().includes(queryStr.toLowerCase()) && c.id !== senderId
-    ).slice(0, 5);
-    
-    setSearchResults(results);
+    const results = await searchCharacters(queryStr);
+    setSearchResults(results.filter(c => c.id !== senderId));
   };
 
   const handleTransfer = async (e: React.FormEvent) => {

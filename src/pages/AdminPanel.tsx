@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Navigate, Link } from 'react-router-dom';
+import { Navigate, Link, useSearchParams } from 'react-router-dom';
 import { 
   Users, 
   Database, 
@@ -17,28 +17,48 @@ import {
   History,
   Check,
   X,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function AdminPanel() {
   const { userProfile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { 
     allCharacters, 
     allLogs, 
     allUsers, 
     allTransactions, 
+    adminWarnings,
+    priorityItems,
     deleteCharacter, 
     deleteUser, 
     banUser, 
     updateUserRole, 
     deleteLog, 
     clearAllLogs, 
+    dismissWarning,
+    clearPriority,
     resetEconomy, 
     resetAllProgress 
   } = useData();
-  const [activeTab, setActiveTab] = useState<'characters' | 'logs' | 'users' | 'transactions'>('characters');
+  
+  const [activeTab, setActiveTab] = useState<'characters' | 'logs' | 'users' | 'transactions' | 'alerts'>((searchParams.get('tab') as any) || 'characters');
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && ['characters', 'logs', 'users', 'transactions', 'alerts'].includes(tab)) {
+      setActiveTab(tab as any);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [logFilter, setLogFilter] = useState<'ALL' | 'CREATE' | 'UPDATE' | 'DELETE' | 'UPDATE BY ADMIN'>('ALL');
   const [transSearchTerm, setTransSearchTerm] = useState('');
@@ -47,6 +67,7 @@ export default function AdminPanel() {
   
   // Modals
   const [logToDelete, setLogToDelete] = useState<string | null>(null);
+  const [charToDelete, setCharToDelete] = useState<any | null>(null);
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const [showResetEconomyConfirm, setShowResetEconomyConfirm] = useState(false);
   const [showResetAllConfirm, setShowResetAllConfirm] = useState(false);
@@ -188,31 +209,70 @@ export default function AdminPanel() {
         </div>
       </div>
 
+      <AnimatePresence>
+        {adminWarnings.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-red-500/10 border border-red-500/30 rounded-3xl p-6 flex flex-col md:flex-row items-center justify-between gap-4"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 animate-pulse">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Abuse Detected!</h3>
+                <p className="text-red-400/80">There are {adminWarnings.length} suspicious activities flagged by the system.</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setActiveTab('alerts')}
+              className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-red-900/20"
+            >
+              Take Action Now
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-neutral-900 rounded-3xl shadow-sm border border-neutral-800 overflow-hidden">
         <div className="flex border-b border-neutral-800">
           <button 
-            onClick={() => setActiveTab('characters')}
+            onClick={() => handleTabChange('characters')}
             className={`flex-1 py-4 text-sm font-bold transition-all ${activeTab === 'characters' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500 shadow-inner shadow-indigo-500/5' : 'text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300'}`}
           >
             All Records
           </button>
           <button 
-            onClick={() => setActiveTab('users')}
+            onClick={() => handleTabChange('users')}
             className={`flex-1 py-4 text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500 shadow-inner shadow-indigo-500/5' : 'text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300'}`}
           >
             Users
           </button>
           <button 
-            onClick={() => setActiveTab('transactions')}
+            onClick={() => handleTabChange('transactions')}
             className={`flex-1 py-4 text-sm font-bold transition-all ${activeTab === 'transactions' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500 shadow-inner shadow-indigo-500/5' : 'text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300'}`}
           >
             Transactions
           </button>
           <button 
-            onClick={() => setActiveTab('logs')}
+            onClick={() => handleTabChange('logs')}
             className={`flex-1 py-4 text-sm font-bold transition-all ${activeTab === 'logs' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500 shadow-inner shadow-indigo-500/5' : 'text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300'}`}
           >
             Live Logs Feed
+          </button>
+          <button 
+            onClick={() => handleTabChange('alerts')}
+            className={`flex-1 py-4 text-sm font-bold transition-all relative ${activeTab === 'alerts' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500 shadow-inner shadow-indigo-500/5' : 'text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300'}`}
+          >
+            Abuse Alerts
+            {adminWarnings.length > 0 && (
+              <span className="absolute top-2 right-2 flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+            )}
           </button>
         </div>
 
@@ -272,11 +332,7 @@ export default function AdminPanel() {
                           <td className="p-4 text-neutral-500">{char.updatedAt ? formatDistanceToNow(char.updatedAt) : 'Never'} ago</td>
                           <td className="p-4 text-right">
                             <button
-                              onClick={async () => {
-                                if (window.confirm(`Are you sure you want to delete ${char.name}?`)) {
-                                  await deleteCharacter(char.id);
-                                }
-                              }}
+                              onClick={() => setCharToDelete(char)}
                               className="p-2 text-red-500 hover:text-red-400 hover:bg-red-900/30 rounded-lg transition-colors"
                               title="Delete Character"
                             >
@@ -397,71 +453,109 @@ export default function AdminPanel() {
 
           {activeTab === 'transactions' && (
             <div className="space-y-4">
-              <div className="flex justify-between items-center mb-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
                 <h3 className="font-bold text-white">Transaction Logs</h3>
-                <div className="relative w-64">
-                  <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
-                  <input 
-                    type="text" 
-                    placeholder="Search by Transaction Number..." 
-                    value={transSearchTerm}
-                    onChange={(e) => setTransSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-black border border-neutral-800 text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none"
-                  />
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-64">
+                    <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-500" />
+                    <input 
+                      type="text" 
+                      placeholder="Search by Transaction Number..." 
+                      value={transSearchTerm}
+                      onChange={(e) => setTransSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-black border border-neutral-800 text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none"
+                    />
+                  </div>
+                  <button 
+                    onClick={() => {
+                      priorityItems.filter(p => p.type === 'trans').forEach(p => clearPriority(p.id));
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-bold transition-all border border-neutral-800"
+                    title="Clear Priority Highlights"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span className="hidden sm:inline">Sync</span>
+                  </button>
                 </div>
               </div>
               
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
                 {(allTransactions || [])
                   .filter(t => !transSearchTerm || t.id.toLowerCase().includes(transSearchTerm.toLowerCase()))
-                  .map(log => (
-                  <div key={log.id} className="border border-neutral-800 rounded-xl overflow-hidden">
-                    <div 
-                      onClick={() => setSelectedTransLog(selectedTransLog === log.id ? null : log.id)}
-                      className="p-4 bg-neutral-900 hover:bg-neutral-800 cursor-pointer flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 text-white font-medium">
-                        <span>{log.senderCharName}</span>
-                        <ArrowRightLeft className="w-4 h-4 text-neutral-500" />
-                        <span>{log.recipientCharName}</span>
-                        <span className="text-yellow-400 ml-2">= {log.amount.toLocaleString()} V</span>
-                      </div>
-                      <div className="text-xs text-neutral-500 font-mono">
-                        ({log.id})
-                      </div>
-                    </div>
-                    
-                    <AnimatePresence>
-                      {selectedTransLog === log.id && (
-                        <motion.div 
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="border-t border-neutral-800 bg-black p-4 text-sm"
+                  .sort((a, b) => {
+                    const aPrio = priorityItems.some(p => p.id === a.id);
+                    const bPrio = priorityItems.some(p => p.id === b.id);
+                    if (aPrio && !bPrio) return -1;
+                    if (!aPrio && bPrio) return 1;
+                    return (b.timestamp || 0) - (a.timestamp || 0);
+                  })
+                  .map(log => {
+                    const isPriority = priorityItems.some(p => p.id === log.id && p.type === 'trans');
+                    return (
+                      <div key={log.id} className={`border rounded-xl overflow-hidden ${isPriority ? 'border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-neutral-800'}`}>
+                        <div 
+                          onClick={() => setSelectedTransLog(selectedTransLog === log.id ? null : log.id)}
+                          className={`p-4 cursor-pointer flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 transition-colors ${isPriority ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'bg-neutral-900 hover:bg-neutral-800'}`}
                         >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <p className="text-neutral-500 mb-1">Reason / Purpose</p>
-                              <p className="font-medium text-white">{log.reason}</p>
-                            </div>
-                            <div>
-                              <p className="text-neutral-500 mb-1">Date & Time</p>
-                              <p className="font-medium text-white">{new Date(log.timestamp).toLocaleString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-neutral-500 mb-1">Sender</p>
-                              <p className="font-medium text-white">{log.senderCharName} <span className="text-xs text-neutral-600 font-mono">[{log.senderCharId?.slice(0, 8) || 'unknown'}...]</span></p>
-                            </div>
-                            <div>
-                              <p className="text-neutral-500 mb-1">Recipient</p>
-                              <p className="font-medium text-white">{log.recipientCharName} <span className="text-xs text-neutral-600 font-mono">[{log.recipientCharId?.slice(0, 8) || 'unknown'}...]</span></p>
+                          <div className="flex items-center gap-2 text-white font-medium">
+                            {isPriority && <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />}
+                            <span>{log.senderCharName}</span>
+                            <ArrowRightLeft className="w-4 h-4 text-neutral-500" />
+                            <span>{log.recipientCharName}</span>
+                            <span className="text-yellow-400 ml-2">= {log.amount.toLocaleString()} V</span>
+                            {isPriority && <span className="bg-amber-500 text-black text-[10px] px-1.5 py-0.5 rounded-full font-black ml-2">PRIORITY</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isPriority && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clearPriority(log.id);
+                                }}
+                                className="p-1.5 bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 rounded-lg transition-colors border border-amber-500/20"
+                                title="Dismiss Highlight"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            )}
+                            <div className="text-xs text-neutral-500 font-mono">
+                              ({log.id})
                             </div>
                           </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ))}
+                        </div>
+                        
+                        <AnimatePresence>
+                          {selectedTransLog === log.id && (
+                            <motion.div 
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="border-t border-neutral-800 bg-black p-4 text-sm"
+                            >
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-neutral-500 mb-1">Reason / Purpose</p>
+                                  <p className="font-medium text-white">{log.reason}</p>
+                                </div>
+                                <div>
+                                  <p className="text-neutral-500 mb-1">Date & Time</p>
+                                  <p className="font-medium text-white">{new Date(log.timestamp).toLocaleString()}</p>
+                                </div>
+                                <div>
+                                  <p className="text-neutral-500 mb-1">Sender</p>
+                                  <p className="font-medium text-white">{log.senderCharName} <span className="text-xs text-neutral-600 font-mono">[{log.senderCharId?.slice(0, 8) || 'unknown'}...]</span></p>
+                                </div>
+                                <div>
+                                  <p className="text-neutral-500 mb-1">Recipient</p>
+                                  <p className="font-medium text-white">{log.recipientCharName} <span className="text-xs text-neutral-600 font-mono">[{log.recipientCharId?.slice(0, 8) || 'unknown'}...]</span></p>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -485,6 +579,15 @@ export default function AdminPanel() {
                     <button onClick={() => setLogFilter('DELETE')} className={`px-3 py-1 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${logFilter === 'DELETE' ? 'bg-black text-red-400 shadow-sm border border-neutral-700' : 'text-neutral-400 hover:text-red-400'}`}>Deletes</button>
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
+                    <button 
+                      onClick={() => {
+                        priorityItems.filter(p => p.type === 'stat').forEach(p => clearPriority(p.id));
+                      }}
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-sm font-bold transition-all border border-neutral-800"
+                      title="Clear Priority Highlights"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Sync
+                    </button>
                     <button 
                       onClick={() => {
                         setResetType('economy');
@@ -515,42 +618,70 @@ export default function AdminPanel() {
                 </div>
               </div>
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-                {(allLogs || []).filter(log => logFilter === 'ALL' || log.action === logFilter).map(log => {
-                  const charName = log.charName || (allCharacters || []).find(c => c.id === log.charId)?.name || 'Unknown Record';
-                  const username = log.username || (allUsers || []).find(u => u.id === log.userId)?.username || 'Unknown';
-                  
-                  let details = '';
-                  if ((log.action === 'UPDATE' || log.action === 'UPDATE BY ADMIN') && log.oldData && log.newData) {
-                    const changes = [];
-                    if (log.oldData.level !== log.newData.level) changes.push(`Level ${log.oldData.level}→${log.newData.level}`);
-                    if (log.oldData.karmaPoint !== log.newData.karmaPoint) changes.push(`Karma ${log.oldData.karmaPoint}→${log.newData.karmaPoint}`);
-                    if (log.oldData.vela !== log.newData.vela) changes.push(`Vela ${log.oldData.vela}→${log.newData.vela}`);
-                    details = changes.join(', ');
-                  }
+                {(allLogs || [])
+                  .filter(log => logFilter === 'ALL' || log.action === logFilter)
+                  .sort((a, b) => {
+                    const aPrio = priorityItems.some(p => p.id === a.id);
+                    const bPrio = priorityItems.some(p => p.id === b.id);
+                    if (aPrio && !bPrio) return -1;
+                    if (!aPrio && bPrio) return 1;
+                    return (b.timestamp || 0) - (a.timestamp || 0);
+                  })
+                  .map(log => {
+                    const charName = log.charName || (allCharacters || []).find(c => c.id === log.charId)?.name || 'Unknown Record';
+                    const username = log.username || (allUsers || []).find(u => u.id === log.userId)?.username || 'Unknown';
+                    const isPriority = priorityItems.some(p => p.id === log.id && p.type === 'stat');
+                    
+                    let details = '';
+                    if ((log.action === 'UPDATE' || log.action === 'UPDATE BY ADMIN') && log.oldData && log.newData) {
+                      const changes = [];
+                      if (log.oldData.level !== log.newData.level) changes.push(`Level ${log.oldData.level}→${log.newData.level}`);
+                      if (log.oldData.karmaPoint !== log.newData.karmaPoint) changes.push(`Karma ${log.oldData.karmaPoint}→${log.newData.karmaPoint}`);
+                      if (log.oldData.vela !== log.newData.vela) changes.push(`Vela ${log.oldData.vela}→${log.newData.vela}`);
+                      details = changes.join(', ');
+                    }
 
                   return (
-                    <div key={log.id} className="border border-neutral-800 rounded-xl overflow-hidden">
+                    <div key={log.id} className={`border rounded-xl overflow-hidden ${isPriority ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.1)]' : 'border-neutral-800'}`}>
                       <div 
                         onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
-                        className="p-4 bg-neutral-900 hover:bg-neutral-800 cursor-pointer flex items-start gap-4 transition-colors"
+                        className={`p-4 cursor-pointer flex items-start gap-4 transition-colors ${isPriority ? 'bg-indigo-500/10 hover:bg-indigo-500/15' : 'bg-neutral-900 hover:bg-neutral-800'}`}
                       >
-                        <div className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${log.action === 'CREATE' ? 'bg-emerald-500' : log.action === 'DELETE' ? 'bg-red-500' : log.action === 'UPDATE BY ADMIN' ? 'bg-purple-500' : 'bg-indigo-500'}`} />
+                        <div className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${isPriority ? 'bg-indigo-400 animate-pulse' : log.action === 'CREATE' ? 'bg-emerald-500' : log.action === 'DELETE' ? 'bg-red-500' : log.action === 'UPDATE BY ADMIN' ? 'bg-purple-500' : 'bg-indigo-500'}`} />
                         <div className="flex-1">
                           <div className="flex justify-between">
-                            <span className="font-bold text-white">{charName} <span className="text-neutral-500 font-normal text-sm hidden sm:inline" title={log.charId}>({log.charId?.slice(0, 8) || 'unknown'}...)</span></span>
+                            <span className="font-bold text-white">
+                              {charName} 
+                              <span className="text-neutral-500 font-normal text-sm hidden sm:inline" title={log.charId}>({log.charId?.slice(0, 8) || 'unknown'}...)</span>
+                              {isPriority && <span className="bg-indigo-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black ml-2 animate-pulse uppercase">Priority</span>}
+                            </span>
                             <div className="flex items-center gap-3">
                               <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${log.action === 'UPDATE BY ADMIN' ? 'bg-purple-900/30 text-purple-400' : 'hidden'}`}>ADMIN</span>
                               <span className="text-xs text-neutral-500">{log.timestamp ? formatDistanceToNow(log.timestamp) : 'unknown'} ago</span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setLogToDelete(log.id);
-                                }}
-                                className="text-neutral-500 hover:text-red-400 transition-colors p-1"
-                                title="Delete log"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                {isPriority && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      clearPriority(log.id);
+                                    }}
+                                    className="p-1 px-2 text-[10px] font-bold bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded border border-indigo-500/20 mr-1"
+                                    title="Un-highlight"
+                                  >
+                                    OK
+                                  </button>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLogToDelete(log.id);
+                                  }}
+                                  className="text-neutral-500 hover:text-red-400 transition-colors p-1"
+                                  title="Delete log"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                           <p className="text-sm text-neutral-400 mt-1">
@@ -599,6 +730,64 @@ export default function AdminPanel() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'alerts' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-white">Security Alerts</h3>
+                <span className="text-xs text-neutral-500">Auto-generated via smart behavior analysis</span>
+              </div>
+
+              {adminWarnings.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-16 h-16 bg-neutral-800 text-neutral-600 rounded-full flex items-center justify-center mb-4">
+                    <Check className="w-8 h-8" />
+                  </div>
+                  <p className="text-neutral-500">No abuse detected. System is secure.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {adminWarnings.map((warning) => (
+                    <motion.div 
+                      key={warning.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="bg-black border border-red-900/30 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-start gap-4 flex-1">
+                        <div className="w-10 h-10 bg-red-900/20 text-red-500 rounded-xl flex items-center justify-center flex-shrink-0 mt-1">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="px-2 py-0.5 bg-red-500/10 text-red-500 rounded text-[10px] font-bold uppercase tracking-wider">{warning.type} SPIKE</span>
+                            <span className="text-xs text-neutral-500">{formatDistanceToNow(warning.timestamp)} ago</span>
+                          </div>
+                          <p className="text-white font-medium leading-relaxed">
+                            {warning.message}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 w-full md:w-auto">
+                        <Link 
+                          to={`/character/${warning.charId}`}
+                          className="flex-1 md:flex-none text-center px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-sm font-bold transition-all"
+                        >
+                          Check Record
+                        </Link>
+                        <button 
+                          onClick={() => dismissWarning(warning.id)}
+                          className="flex-1 md:flex-none px-4 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-500 rounded-xl text-sm font-bold transition-all border border-red-500/20"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -707,21 +896,25 @@ export default function AdminPanel() {
                     </button>
                     <button 
                       onClick={async () => {
-                        if (userProfile.twoFactorPin && resetPinInput !== userProfile.twoFactorPin) {
+                        if (userProfile?.twoFactorPin && resetPinInput !== userProfile.twoFactorPin) {
                           setResetPinError('Incorrect PIN');
                           return;
                         }
-                        if (resetType === 'economy') {
-                          await resetEconomy();
-                          setShowResetEconomyConfirm(false);
-                        } else {
-                          await resetAllProgress();
-                          setShowResetAllConfirm(false);
+                        try {
+                          if (resetType === 'economy') {
+                            await resetEconomy();
+                            setShowResetEconomyConfirm(false);
+                          } else {
+                            await resetAllProgress();
+                            setShowResetAllConfirm(false);
+                          }
+                          setResetStep(1);
+                          setResetPinInput('');
+                        } catch (err: any) {
+                          setResetPinError(err.message || 'Reset failed');
                         }
-                        setResetStep(1);
-                        setResetPinInput('');
                       }}
-                      disabled={userProfile.twoFactorPin ? resetPinInput.length !== 4 : false}
+                      disabled={userProfile?.twoFactorPin ? resetPinInput.length !== 4 : false}
                       className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
                     >
                       CONFIRM RESET
@@ -758,6 +951,49 @@ export default function AdminPanel() {
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors"
                 >
                   Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {charToDelete && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 max-w-md w-full shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-red-900/30 border border-red-900/50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2 text-center">Delete Character Record?</h3>
+              <p className="text-neutral-400 mb-6 text-center">Are you sure you want to delete <span className="text-white font-bold">{charToDelete.name}</span>? This action will permanently erase this character's data.</p>
+              <div className="flex flex-col gap-2">
+                <button 
+                  onClick={async (e) => {
+                    const btn = e.currentTarget;
+                    btn.disabled = true;
+                    btn.innerText = 'Deleting...';
+                    try {
+                      await deleteCharacter(charToDelete.id);
+                      setCharToDelete(null);
+                    } catch (err: any) {
+                      alert(`Delete failed: ${err.message}`);
+                      btn.disabled = false;
+                      btn.innerText = 'Yes, Delete Record';
+                    }
+                  }}
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Yes, Delete Record
+                </button>
+                <button 
+                  onClick={() => setCharToDelete(null)}
+                  className="w-full py-3 bg-neutral-800 text-neutral-300 rounded-xl font-bold hover:bg-neutral-700 transition-colors"
+                >
+                  Cancel
                 </button>
               </div>
             </motion.div>
@@ -819,7 +1055,7 @@ export default function AdminPanel() {
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={async () => {
-                        if (userActionPin !== userProfile?.twoFactorPin) {
+                        if (userProfile?.twoFactorPin && userActionPin !== userProfile.twoFactorPin) {
                           setUserActionError('Incorrect Security PIN');
                           return;
                         }

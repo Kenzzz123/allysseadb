@@ -49,14 +49,33 @@ export interface Transaction {
   timestamp: number;
 }
 
+export interface AdminWarning {
+  id: string;
+  userId: string;
+  userEmail: string;
+  charId: string;
+  charName: string;
+  type: 'Vela' | 'Level';
+  amount: number;
+  message: string;
+  timestamp: number;
+}
+
 interface DataContextType {
   characters: Character[];
+  topVela: Character[];
+  topLevel: Character[];
   allCharacters: Character[]; // For admin
   allUsers: any[]; // For admin
   logs: Log[];
   allLogs: Log[]; // For admin
   transactions: Transaction[];
   allTransactions: Transaction[]; // For admin
+  adminWarnings: AdminWarning[]; // For admin
+  priorityItems: {id: string, type: 'stat' | 'trans'}[];
+  refreshLeaderboard: () => Promise<void>;
+  clearPriority: (id: string) => void;
+  searchCharacters: (query: string) => Promise<Character[]>;
   createCharacter: (name: string, stats: CharacterStats) => Promise<void>;
   updateCharacter: (id: string, newStats: CharacterStats, from?: string, reason?: string) => Promise<void>;
   renameCharacter: (id: string, newName: string) => Promise<void>;
@@ -67,6 +86,7 @@ interface DataContextType {
   updateUserRole: (userId: string, newRole: 'player' | 'admin' | 'system') => Promise<void>;
   deleteLog: (logId: string) => Promise<void>;
   clearAllLogs: () => Promise<void>;
+  dismissWarning: (warningId: string) => Promise<void>;
   resetEconomy: () => Promise<void>;
   resetAllProgress: () => Promise<void>;
   createTransaction: (senderCharId: string, recipientCharId: string, amount: number, reason: string) => Promise<void>;
@@ -83,12 +103,73 @@ export const useData = () => {
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, userProfile } = useAuth();
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [topVela, setTopVela] = useState<Character[]>([]);
+  const [topLevel, setTopLevel] = useState<Character[]>([]);
   const [allCharacters, setAllCharacters] = useState<Character[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
   const [allLogs, setAllLogs] = useState<Log[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+  const [adminWarnings, setAdminWarnings] = useState<AdminWarning[]>([]);
+  const [priorityItems, setPriorityItems] = useState<{id: string, type: 'stat' | 'trans'}[]>([]);
+
+  const fetchLeaderboard = async () => {
+    try {
+      const { getDocs } = await import('firebase/firestore');
+      
+      const qVela = query(
+        collection(db, 'characters'), 
+        where('isSystem', '==', false),
+        orderBy('stats.vela', 'desc'), 
+        limit(50)
+      );
+      const qLevel = query(
+        collection(db, 'characters'), 
+        where('isSystem', '==', false),
+        orderBy('stats.level', 'desc'), 
+        limit(50)
+      );
+
+      const [velaSnap, levelSnap] = await Promise.all([
+        getDocs(qVela),
+        getDocs(qLevel)
+      ]);
+
+      setTopVela(velaSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character)));
+      setTopLevel(levelSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character)));
+    } catch (error) {
+      console.error("Leaderboard fetch error:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchLeaderboard();
+    // Refresh every 10 minutes to save budget
+    const interval = setInterval(fetchLeaderboard, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const searchCharacters = async (queryStr: string) => {
+    if (!queryStr || queryStr.length < 2) return [];
+    try {
+      const { getDocs } = await import('firebase/firestore');
+      // Case-insensitive search is hard in Firestore, 
+      // simple implementation using range query
+      const q = query(
+        collection(db, 'characters'),
+        where('isSystem', '==', false),
+        where('name', '>=', queryStr),
+        where('name', '<=', queryStr + '\uf8ff'),
+        limit(10)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
+    } catch (err) {
+      console.error("Search characters error:", err);
+      return [];
+    }
+  };
 
   useEffect(() => {
     if (!currentUser) {
@@ -108,31 +189,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCharacters(charsData);
     });
 
-    // Listen to user's logs
-    const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid));
+    // Listen to user's logs - Limited to 50
+    const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(50));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
-      logsData.sort((a, b) => b.timestamp - a.timestamp);
-      setLogs(logsData.slice(0, 100));
+      setLogs(logsData);
     }, (error) => {
       console.error("Logs listener error:", error);
     });
 
     // Listen to user's transactions (where user is sender or recipient)
-    // Firestore OR queries are supported but we can also just fetch all and filter, or use two queries.
-    // Let's use two queries and merge them, or fetch all if admin.
-    // Actually, Firestore supports 'or' queries now, but for simplicity we can just query where senderUserId == uid or recipientUserId == uid.
-    // Wait, firebase/firestore might not have 'or' imported. Let's just fetch all transactions and filter client-side for now since it's a small app, or use two queries.
-    // Let's use two queries and merge.
-    const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid));
-    const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid));
+    const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(30));
+    const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(30));
     
     let userTransMap = new Map<string, Transaction>();
     
-    const updateTrans = () => {
-      const sorted = Array.from(userTransMap.values()).sort((a, b) => b.timestamp - a.timestamp);
-      setTransactions(sorted);
-    };
+      const updateTrans = () => {
+        const sorted = Array.from(userTransMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        setTransactions(sorted);
+      };
 
     const unsubTransSender = onSnapshot(qTransSender, (snapshot) => {
       snapshot.docs.forEach(doc => userTransMap.set(doc.id, { id: doc.id, ...doc.data() } as Transaction));
@@ -152,18 +227,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubAllLogs = () => {};
     let unsubAllUsers = () => {};
     let unsubAllTrans = () => {};
-
-    const qAllChars = query(collection(db, 'characters'));
-    unsubAllChars = onSnapshot(qAllChars, (snapshot) => {
-      const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
-      setAllCharacters(charsData);
-    }, (error) => {
-      console.error("AllChars listener error:", error);
-    });
+    let unsubAdminWarnings = () => {};
 
     // If admin, listen to all logs, users, and transactions
     if (userProfile?.role === 'admin') {
-      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(500));
+      const qAllChars = query(collection(db, 'characters'), limit(200));
+      unsubAllChars = onSnapshot(qAllChars, (snapshot) => {
+        const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
+        setAllCharacters(charsData);
+      }, (error) => {
+        console.error("AllChars listener error:", error);
+      });
+
+      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(100)); // Reduced limit to 100
       unsubAllLogs = onSnapshot(qAllLogs, (snapshot) => {
         const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
         setAllLogs(logsData);
@@ -171,7 +247,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error("All Logs listener error:", error);
       });
 
-      const qAllUsers = query(collection(db, 'users'));
+      const qAllUsers = query(collection(db, 'users'), limit(100));
       unsubAllUsers = onSnapshot(qAllUsers, (snapshot) => {
         const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAllUsers(usersData);
@@ -179,13 +255,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error("AllUsers listener error:", error);
       });
 
-      const qAllTrans = query(collection(db, 'transactions'));
+      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(200));
       unsubAllTrans = onSnapshot(qAllTrans, (snapshot) => {
         const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-        transData.sort((a, b) => b.timestamp - a.timestamp);
+        // No need to sort manually if we use orderBy in the query
         setAllTransactions(transData);
       }, (error) => {
         console.error("AllTrans listener error:", error);
+      });
+
+      const qWarnings = query(collection(db, 'admin_warnings'), orderBy('timestamp', 'desc'), limit(50));
+      unsubAdminWarnings = onSnapshot(qWarnings, (snapshot) => {
+        const warningsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminWarning));
+        setAdminWarnings(warningsData);
+      }, (error) => {
+        console.error("AdminWarnings listener error:", error);
       });
     }
 
@@ -198,6 +282,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubAllLogs();
       unsubAllUsers();
       unsubAllTrans();
+      unsubAdminWarnings();
     };
   }, [currentUser, userProfile]);
 
@@ -228,6 +313,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  const clearPriority = (id: string) => {
+    setPriorityItems(prev => prev.filter(item => item.id !== id));
+  };
+
   const updateCharacter = async (id: string, newStats: CharacterStats, from?: string, reason?: string) => {
     if (!currentUser) return;
     const char = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
@@ -255,6 +344,31 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (from) logData.from = from;
     if (reason) logData.reason = reason;
     await setDoc(newLogRef, logData);
+
+    // Abuse Detection (Updated Thresholds: Level > 20, Vela > 500,000)
+    const levelDiff = newStats.level - char.stats.level;
+    const velaDiff = newStats.vela - char.stats.vela;
+
+    if (levelDiff > 20 || (velaDiff > 500000 && from !== 'System (Transfer)')) {
+      const warningRef = doc(collection(db, 'admin_warnings'));
+      const type = levelDiff > 20 ? 'Level' : 'Vela';
+      const amount = levelDiff > 20 ? levelDiff : velaDiff;
+      const ownerEmail = (allUsers.find(u => u.id === char.userId)?.email) || currentUser.email || 'Unknown';
+      
+      await setDoc(warningRef, {
+        userId: char.userId,
+        userEmail: ownerEmail,
+        charId: id,
+        charName: char.name,
+        type,
+        amount,
+        message: `[${char.name}] telah melakukan abuse di bagian [${type}] sebanyak [${amount.toLocaleString()}] (${ownerEmail}). Lakukan tindakan segera!`,
+        timestamp: now
+      });
+    } else if (levelDiff > 5 || (velaDiff > 100000 && from !== 'System (Transfer)')) {
+      // Priority Check Highlight (Level > 5 or Vela > 100,000)
+      setPriorityItems(prev => [...prev, { id: newLogRef.id, type: 'stat' }]);
+    }
   };
 
   const renameCharacter = async (id: string, newName: string) => {
@@ -397,6 +511,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await batch.commit();
   };
 
+  const dismissWarning = async (warningId: string) => {
+    if (!currentUser || userProfile?.role !== 'admin') return;
+    await deleteDoc(doc(db, 'admin_warnings', warningId));
+  };
+
   const resetEconomy = async () => {
     if (!currentUser || userProfile?.role !== 'admin') return;
     const { writeBatch } = await import('firebase/firestore');
@@ -532,6 +651,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timestamp: now
     });
 
+    // Priority Check for Transfers > 100,000
+    if (amount > 100000) {
+      setPriorityItems(prev => [...prev, { id: transRef.id, type: 'trans' }]);
+    }
+
     // Create log for sender
     const senderLogRef = doc(collection(db, 'logs'));
     await setDoc(senderLogRef, {
@@ -560,7 +684,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <DataContext.Provider value={{ characters, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, createCharacter, updateCharacter, renameCharacter, updateCharacterPin, deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, clearAllLogs, resetEconomy, resetAllProgress, createTransaction }}>
+    <DataContext.Provider value={{ characters, topVela, topLevel, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, adminWarnings, priorityItems, refreshLeaderboard: fetchLeaderboard, clearPriority, searchCharacters, createCharacter, updateCharacter, renameCharacter, updateCharacterPin, deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, clearAllLogs, dismissWarning, resetEconomy, resetAllProgress, createTransaction }}>
       {children}
     </DataContext.Provider>
   );
