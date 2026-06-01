@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import Layout from './components/Layout';
+import QuotaBanner from './components/QuotaBanner';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import CharacterDetail from './pages/CharacterDetail';
@@ -21,6 +22,7 @@ export default function App() {
   return (
     <AuthProvider>
       <DataProvider>
+        <QuotaBanner />
         <Router>
           <Routes>
             <Route path="/" element={<Layout />}>

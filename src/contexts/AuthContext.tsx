@@ -11,54 +11,7 @@ import {
   getRedirectResult
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, getDocFromServer } from 'firebase/firestore';
-import { auth, db, googleProvider } from '../lib/firebase';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+import { auth, db, googleProvider, OperationType, handleFirestoreError } from '../lib/firebase';
 
 export interface UserProfile {
   username: string;
@@ -135,83 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         setCurrentUser(user);
-        if (user) {
-          const userRef = doc(db, 'users', user.uid);
-          
-          // First check if doc exists to avoid race condition
-          try {
-            const docSnap = await getDoc(userRef);
-            if (!docSnap.exists()) {
-              const isAdminEmail = user.email === 'ferdinand262010@gmail.com';
-              const newProfile: UserProfile = {
-                username: user.displayName || user.email?.split('@')[0] || 'Player',
-                email: user.email || '',
-                role: isAdminEmail ? 'admin' : 'player',
-                createdAt: Date.now(),
-                lastSeen: Date.now(),
-                online: true,
-              };
-              await setDoc(userRef, newProfile).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`));
-            } else {
-              const data = docSnap.data();
-              const updates: any = { lastSeen: Date.now(), online: true };
-              if (!data?.role) {
-                updates.role = user.email === 'ferdinand262010@gmail.com' ? 'admin' : 'player';
-              }
-              if (!data?.username) {
-                updates.username = user.displayName || user.email?.split('@')[0] || 'Player';
-              }
-              await setDoc(userRef, updates, { merge: true }).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`));
-            }
-          } catch (err) {
-            console.error("Error initializing user profile:", err);
-            // If it was already handled by handleFirestoreError, it will re-throw anyway
-          }
-
-          // Set up real-time listener for user profile
-          const unsubProfile = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-              setUserProfile(docSnap.data() as UserProfile);
-            }
-            setLoading(false);
-          }, (err) => {
-            console.error("Profile snapshot error:", err);
-            setLoading(false);
-          });
-
-          // Handle offline status on disconnect with throttling/debouncing
-          let statusTimeout: NodeJS.Timeout | null = null;
-          const updateOnlineStatus = (isOnline: boolean) => {
-            if (statusTimeout) clearTimeout(statusTimeout);
-            
-            // Debounce the update to avoid spamming writes on rapid tab switching
-            statusTimeout = setTimeout(async () => {
-              // Only update if the status is actually changed or if it's been a while
-              // But we don't easily have the current actual DB value without a fetch
-              // So we rely on the debounce to at least stop rapid changes.
-              try {
-                await setDoc(userRef, { 
-                  online: isOnline, 
-                  lastSeen: Date.now() 
-                }, { merge: true });
-              } catch (err) {
-                handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
-              }
-            }, 3000); // 3 second debounce
-          };
-
-          const handleVisibilityChange = () => {
-            updateOnlineStatus(document.visibilityState === 'visible');
-          };
-
-          document.addEventListener('visibilitychange', handleVisibilityChange);
-
-          return () => {
-            unsubProfile();
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            updateOnlineStatus(false);
-          };
-        } else {
+        if (!user) {
           setUserProfile(null);
           setLoading(false);
         }
@@ -223,6 +100,95 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setUserProfile(null);
+      return;
+    }
+
+    let unsubProfile = () => {};
+    let statusTimeout: NodeJS.Timeout | null = null;
+    const userRef = doc(db, 'users', currentUser.uid);
+
+    const initializeAndListenProfile = async () => {
+      try {
+        // First check if doc exists to avoid race condition
+        const docSnap = await getDoc(userRef);
+        if (!docSnap.exists()) {
+          const isAdminEmail = currentUser.email === 'ferdinand262010@gmail.com';
+          const newProfile: UserProfile = {
+            username: currentUser.displayName || currentUser.email?.split('@')[0] || 'Player',
+            email: currentUser.email || '',
+            role: isAdminEmail ? 'admin' : 'player',
+            createdAt: Date.now(),
+            lastSeen: Date.now(),
+            online: true,
+          };
+          await setDoc(userRef, newProfile).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${currentUser.uid}`));
+        } else {
+          const data = docSnap.data();
+          const updates: any = { lastSeen: Date.now(), online: true };
+          if (!data?.role) {
+            updates.role = currentUser.email === 'ferdinand262010@gmail.com' ? 'admin' : 'player';
+          }
+          if (!data?.username) {
+            updates.username = currentUser.displayName || currentUser.email?.split('@')[0] || 'Player';
+          }
+          await setDoc(userRef, updates, { merge: true }).catch(e => handleFirestoreError(e, OperationType.WRITE, `users/${currentUser.uid}`));
+        }
+      } catch (err) {
+        console.error("Error initializing user profile:", err);
+      }
+
+      // Set up real-time listener for user profile
+      unsubProfile = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setUserProfile(docSnap.data() as UserProfile);
+        }
+        setLoading(false);
+      }, (err) => {
+        const isPermissionErr = err.message.toLowerCase().includes('permission') || err.message.toLowerCase().includes('insufficient');
+        if (isPermissionErr && !auth.currentUser) {
+          console.warn("Expected unauthenticated profile snapshot error during auth transition.");
+        } else {
+          console.error("Profile snapshot error:", err);
+        }
+        setLoading(false);
+      });
+    };
+
+    initializeAndListenProfile();
+
+    const updateOnlineStatus = (isOnline: boolean) => {
+      if (statusTimeout) clearTimeout(statusTimeout);
+      
+      // Debounce the update to avoid spamming writes on rapid tab switching
+      statusTimeout = setTimeout(async () => {
+        try {
+          await setDoc(userRef, { 
+            online: isOnline, 
+            lastSeen: Date.now() 
+          }, { merge: true });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, `users/${currentUser.uid}`);
+        }
+      }, 3000); // 3 second debounce
+    };
+
+    const handleVisibilityChange = () => {
+      updateOnlineStatus(document.visibilityState === 'visible');
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      unsubProfile();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (statusTimeout) clearTimeout(statusTimeout);
+      setDoc(userRef, { online: false, lastSeen: Date.now() }, { merge: true }).catch(() => {});
+    };
+  }, [currentUser]);
 
   const loginWithGoogle = async () => {
     try {

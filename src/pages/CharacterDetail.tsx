@@ -1,22 +1,72 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useData, CharacterStats } from '../contexts/DataContext';
-import { db } from '../lib/firebase';
-import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield, Edit2, Check, X, Download } from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { ArrowLeft, Save, Trash2, History, TrendingUp, TrendingDown, Minus, Plus, Shield, Edit2, Check, X, Download, Star, Zap, Coins, Heart } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function CharacterDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { userProfile, characters, allCharacters, updateCharacter, renameCharacter, deleteCharacter, logs, allLogs } = useData();
-  
-  // Find character in user's characters or all characters (if admin)
-  const character = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
-  const { allUsers } = useData();
-  const ownerProfile = allUsers.find(u => u.id === character?.userId);
+  const { userProfile, characters, updateCharacter, renameCharacter, deleteCharacter } = useData();
+  const [character, setCharacter] = useState<any>(null);
+  const [hasLoadedAtLeastOnce, setHasLoadedAtLeastOnce] = useState(false);
+  const [ownerEmail, setOwnerEmail] = useState<string>('');
   const isAdmin = userProfile?.role === 'admin';
   const [charLogs, setCharLogs] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    // Is it one of the current user's characters?
+    const myChar = characters.find(c => c.id === id);
+    if (myChar) {
+      setCharacter(myChar);
+      setHasLoadedAtLeastOnce(true);
+      return;
+    }
+
+    // Otherwise, listen directly to this character doc (especially useful for admins or direct links)
+    let unsub = () => {};
+    import('firebase/firestore').then(({ doc, onSnapshot }) => {
+      unsub = onSnapshot(doc(db, 'characters', id), (snap) => {
+        if (snap.exists()) {
+          setCharacter({ id: snap.id, ...snap.data() });
+        } else {
+          setCharacter(null);
+        }
+        setHasLoadedAtLeastOnce(true);
+      }, (err) => {
+        console.error("Error loading character detail doc:", err);
+        setHasLoadedAtLeastOnce(true);
+      });
+    });
+
+    return () => unsub();
+  }, [id, characters]);
+
+  // Load owner's profile on demand (without needing to download allUsers database)
+  useEffect(() => {
+    if (!character?.userId) {
+      setOwnerEmail('');
+      return;
+    }
+    
+    import('firebase/firestore').then(({ doc, getDoc }) => {
+      getDoc(doc(db, 'users', character.userId)).then((snap) => {
+        if (snap.exists()) {
+          setOwnerEmail(snap.data().email || 'N/A');
+        } else {
+          setOwnerEmail('N/A');
+        }
+      }).catch(() => {
+        setOwnerEmail('N/A');
+      });
+    });
+  }, [character?.userId]);
+
+  const ownerProfile = { email: ownerEmail };
 
   useEffect(() => {
     if (!id) return;
@@ -33,6 +83,8 @@ export default function CharacterDetail() {
       
       unsub = onSnapshot(q, (snap) => {
         setCharLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'logs');
       });
     });
 
@@ -71,7 +123,10 @@ export default function CharacterDetail() {
   const { updateCharacterPin } = useData();
 
   if (!character) {
-    return <div className="p-8 text-center">Loading record...</div>;
+    if (!hasLoadedAtLeastOnce) {
+      return <div className="p-8 text-center text-neutral-400">Loading record...</div>;
+    }
+    return <div className="p-8 text-center text-red-400 font-bold">Record not found.</div>;
   }
 
   const handleSave = async () => {
@@ -196,15 +251,17 @@ export default function CharacterDetail() {
   const lastUpdateWasAdmin = lastLog?.action === 'UPDATE BY ADMIN';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
-        <Link to="/dashboard" className="flex items-center text-neutral-400 hover:text-white transition-colors">
-          <ArrowLeft className="w-5 h-5 mr-2" />
-          Back to Dashboard
+    <div className="max-w-5xl mx-auto space-y-10">
+      <div className="flex items-center justify-between px-2">
+        <Link to="/dashboard" className="flex items-center text-neutral-500 hover:text-white transition-all group">
+          <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center mr-3 group-hover:bg-white/10 transition-colors">
+            <ArrowLeft className="w-4 h-4" />
+          </div>
+          <span className="text-sm font-bold uppercase tracking-widest">Back</span>
         </Link>
         <button 
           onClick={handleDelete}
-          className="text-red-500 hover:text-red-400 p-2 rounded-lg hover:bg-neutral-800 transition-colors"
+          className="text-red-500/50 hover:text-red-500 p-2 rounded-full hover:bg-red-500/10 transition-all"
           title="Delete Record"
         >
           <Trash2 className="w-5 h-5" />
@@ -212,143 +269,173 @@ export default function CharacterDetail() {
       </div>
 
       {lastUpdateWasAdmin && (
-        <div className="bg-purple-900/20 border border-purple-500/20 text-purple-200 px-6 py-4 rounded-2xl flex items-start gap-3 shadow-sm">
-          <div className="mt-0.5 text-purple-400">
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-brand-secondary/10 border border-brand-secondary/20 text-brand-secondary px-6 py-4 rounded-3xl flex items-start gap-4 shadow-xl"
+        >
+          <div className="mt-1">
             <Shield className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-purple-300">Stats Updated by Admin</h3>
-            <p className="text-sm mt-1">An admin recently updated your stats. Reason: {lastLog.reason}</p>
+            <h3 className="font-display font-bold text-lg leading-tight">Admin Override Applied</h3>
+            <p className="text-sm opacity-80 mt-1 font-medium">Reason: {lastLog.reason}</p>
           </div>
-        </div>
+        </motion.div>
       )}
 
-      <div className="bg-neutral-900 rounded-3xl p-4 sm:p-8 shadow-sm border border-neutral-800">
-        <div className="flex flex-col md:flex-row gap-8 items-start">
-          <div className="w-full md:w-1/3 flex flex-col items-center text-center">
-            <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-3xl sm:text-4xl font-bold shadow-lg shadow-indigo-500/20 mb-4">
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Profile Card */}
+        <div className="glass-card p-10 flex flex-col items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-brand-primary/5 blur-3xl -mr-10 -mt-10 rounded-full" />
+          
+          <div className="relative mb-6">
+            <div className="w-32 h-32 rounded-[2.5rem] bg-gradient-to-br from-brand-primary to-amber-600 flex items-center justify-center text-black text-5xl font-display font-black shadow-[0_0_40px_rgba(250,204,21,0.2)]">
               {(character.name || '?').charAt(0).toUpperCase()}
             </div>
-            
-            {isEditingName ? (
-              <div className="flex items-center gap-2 mb-2">
-                <input
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  className="w-full bg-black text-white px-3 py-1 border border-neutral-800 rounded-lg focus:ring-1 focus:ring-neutral-700 outline-none text-center font-bold text-xl"
-                  autoFocus
-                />
-                <button 
-                  onClick={async () => {
-                    if (tempName.trim() && tempName !== character.name) {
-                      await renameCharacter(character.id, tempName.trim());
-                    }
-                    setIsEditingName(false);
-                  }}
-                  className="p-1.5 bg-emerald-900/30 text-emerald-400 rounded-lg hover:bg-emerald-900/50 transition-colors"
-                >
-                  <Check className="w-4 h-4" />
-                </button>
-                <button 
-                  onClick={() => {
-                    setTempName(character.name);
-                    setIsEditingName(false);
-                  }}
-                  className="p-1.5 bg-red-900/30 text-red-500 rounded-lg hover:bg-red-900/50 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+            <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-[#0A0A0A] border-4 border-[#0A0A0A] rounded-2xl flex items-center justify-center">
+              <div className="w-full h-full bg-white/10 rounded-xl flex items-center justify-center">
+                <Star className="w-4 h-4 text-brand-primary" />
               </div>
-            ) : (
-              <div className="flex items-center gap-2 group justify-center mb-2 cursor-pointer" onClick={() => setIsEditingName(true)}>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-white">{character.name}</h1>
-                <Edit2 className="w-4 h-4 text-neutral-500 group-hover:text-indigo-400 transition-colors" />
-              </div>
-            )}
-
-            {isAdmin && (
-              <div className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-md mb-2">
-                Owner: {ownerProfile?.email || (character.isSystem ? 'system@game.com' : 'Unknown Email')}
-              </div>
-            )}
-
-            {!character.isSystem && (
-              <p className="text-neutral-500 mt-1">Level {character.stats?.level || 0}</p>
-            )}
-            <div className="mt-4 px-4 py-2 bg-yellow-900/30 text-yellow-400 border border-yellow-900/50 rounded-full font-bold flex items-center gap-2">
-              <span className="text-xl">💰</span> {(character.stats?.vela || 0).toLocaleString()} Vela
             </div>
           </div>
+          
+          {isEditingName ? (
+            <div className="flex items-center gap-2 mb-4 w-full">
+              <input
+                type="text"
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                className="input-field text-center font-bold text-xl"
+                autoFocus
+              />
+              <button 
+                onClick={async () => {
+                  if (tempName.trim() && tempName !== character.name) {
+                    await renameCharacter(character.id, tempName.trim());
+                  }
+                  setIsEditingName(false);
+                }}
+                className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl hover:bg-emerald-500/30 transition-colors"
+              >
+                <Check className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => {
+                  setTempName(character.name);
+                  setIsEditingName(false);
+                }}
+                className="p-3 bg-red-500/20 text-red-500 rounded-xl hover:bg-red-500/30 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <div className="group cursor-pointer mb-2" onClick={() => setIsEditingName(true)}>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-display font-black tracking-tight text-white">{character.name}</h1>
+                <Edit2 className="w-4 h-4 text-neutral-600 group-hover:text-brand-primary transition-colors" />
+              </div>
+            </div>
+          )}
 
-          <div className="w-full md:w-2/3">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-2">
-              <h2 className="text-xl font-bold text-white">Edit Stats</h2>
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-500 mb-6">
+            Ref: {character.id.slice(0, 8)}
+          </div>
+
+          {!character.isSystem && (
+            <div className="bg-white/5 border border-white/5 px-6 py-2 rounded-2xl flex items-center gap-3 mb-6">
+              <Zap className="w-4 h-4 text-brand-primary" />
+              <span className="font-bold text-lg">Level {character.stats?.level || 0}</span>
+            </div>
+          )}
+
+          <div className="w-full space-y-3">
+            <div className="flex justify-between items-center p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+              <span className="text-xs text-neutral-500 font-bold uppercase tracking-widest">Vela Balance</span>
+              <span className="font-display font-black text-xl text-brand-primary">{(character.stats?.vela || 0).toLocaleString()} V</span>
+            </div>
+            {isAdmin && (
+              <div className="p-3 bg-brand-secondary/5 border border-brand-secondary/10 rounded-2xl">
+                <p className="text-[10px] text-neutral-500 font-bold uppercase mb-1">Owner Account</p>
+                <p className="text-xs font-bold text-neutral-300 truncate">{ownerProfile?.email || 'N/A'}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Stats Editor */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="glass-card p-8 md:p-10">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-10 gap-4">
+              <div>
+                <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Edit <span className="text-brand-primary">Stats</span></h2>
+                <p className="text-xs text-neutral-500 font-medium mt-1">Modify record statistics in real-time</p>
+              </div>
               {hasChanges && (
-                <span className="px-3 py-1 bg-indigo-900/30 border border-indigo-900/50 text-indigo-400 text-sm font-medium rounded-full animate-pulse">
-                  Unsaved changes
-                </span>
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="px-4 py-1.5 bg-brand-primary/10 border border-brand-primary/30 text-brand-primary text-[10px] font-black uppercase tracking-widest rounded-full"
+                >
+                  Pending Save
+                </motion.div>
               )}
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {character.isSystem ? (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="flex justify-between text-sm font-medium text-neutral-400 capitalize">
-                      Vela Adjustment (Current: {character.stats.vela.toLocaleString()})
-                      {addStats.vela !== 0 && addStats.vela !== '' && addStats.vela !== '-' && (
-                        <span className="text-indigo-600 font-bold">
-                          {renderDiff(character.stats.vela, character.stats.vela + parseInt(addStats.vela as string))}
-                        </span>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <span className="text-neutral-500 font-medium">+/-</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={addStats.vela}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '' || val === '-' || /^-?\d+$/.test(val)) {
-                            handleAddChange('vela', val);
-                          }
-                        }}
-                        placeholder="0 (use - to subtract)"
-                        className="w-full bg-black text-white pl-10 pr-4 py-2 border border-neutral-800 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none transition-all font-mono text-lg"
-                      />
-                    </div>
+                <div className="md:col-span-2 space-y-2">
+                  <label className="flex justify-between items-end px-1">
+                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Add or Remove Vela</span>
                     {addStats.vela !== 0 && addStats.vela !== '' && addStats.vela !== '-' && (
-                      <div className="text-xs text-neutral-500 text-right">
-                        New total: <span className="font-bold text-white">{(character.stats.vela + parseInt(addStats.vela as string)).toLocaleString()}</span>
+                      <div className="text-xs font-bold">
+                        {renderDiff(character.stats.vela, character.stats.vela + parseInt(addStats.vela as string))}
                       </div>
                     )}
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Coins className="w-5 h-5 text-neutral-600 group-focus-within:text-brand-primary transition-colors" />
+                    </div>
+                    <input
+                      type="text"
+                      value={addStats.vela}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '' || val === '-' || /^-?\d+$/.test(val)) {
+                          handleAddChange('vela', val);
+                        }
+                      }}
+                      placeholder="0 (e.g. -500 to subtract)"
+                      className="input-field pl-12 text-xl font-display font-bold py-4"
+                    />
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <>
                   {[
-                    { key: 'level', label: 'Level' },
-                    { key: 'karmaPoint', label: 'Karma Point' },
-                    { key: 'totalIncome', label: 'Total Income' },
-                    { key: 'totalExpense', label: 'Total Expense' },
+                    { key: 'level', label: 'Level', icon: Zap },
+                    { key: 'karmaPoint', label: 'Karma Points', icon: Heart },
+                    { key: 'totalIncome', label: 'Total Income', icon: TrendingUp },
+                    { key: 'totalExpense', label: 'Total Expense', icon: TrendingDown },
                   ].map(stat => {
                     const currentVal = (character.stats as any)[stat.key] || 0;
                     const addVal = addStats[stat.key as keyof CharacterStats] !== undefined ? addStats[stat.key as keyof CharacterStats] : '';
+                    const Icon = stat.icon;
                     return (
                       <div key={stat.key} className="space-y-2">
-                        <label className="flex justify-between text-sm font-medium text-neutral-400 capitalize">
-                          {stat.label} (Current: {currentVal})
+                        <label className="flex justify-between items-end px-1">
+                          <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{stat.label}</span>
                           {addVal !== 0 && addVal !== '' && addVal !== '-' && (
-                            <span className="text-indigo-600 font-bold">
+                            <div className="text-xs font-bold">
                               {renderDiff(currentVal, currentVal + parseInt(addVal as string))}
-                            </span>
+                            </div>
                           )}
                         </label>
-                        <div className="relative">
-                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <span className="text-neutral-500 font-medium">+/-</span>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Icon className="w-4 h-4 text-neutral-600 group-focus-within:text-brand-primary transition-colors" />
                           </div>
                           <input
                             type="text"
@@ -359,129 +446,172 @@ export default function CharacterDetail() {
                                 handleAddChange(stat.key, val);
                               }
                             }}
-                            placeholder="0 (use - to subtract)"
-                            className="w-full bg-black text-white pl-10 pr-4 py-2 border border-neutral-800 rounded-xl focus:ring-1 focus:ring-neutral-700 outline-none transition-all font-mono text-lg"
+                            placeholder="+/- 0"
+                            className="input-field pl-10 font-bold"
                           />
                         </div>
-                        {addVal !== 0 && addVal !== '' && addVal !== '-' && (
-                          <div className="text-xs text-neutral-500 text-right">
-                            New total: <span className="font-bold text-white">{currentVal + parseInt(addVal as string)}</span>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
-                </div>
+                </>
               )}
+            </div>
 
             {hasChanges && (
-              <div className="mt-6 space-y-4 border-t border-neutral-800 pt-6">
-                <h3 className="text-lg font-bold text-white">Change Details</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="mt-10 pt-10 border-t border-white/5 space-y-6"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-neutral-300">From <span className="text-red-500">*</span></label>
+                    <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-1">From</label>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {(['Quest', 'Event', 'System'] as const).map((preset) => {
+                        const isSelected = updateFrom === preset;
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setUpdateFrom(preset)}
+                            className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
+                              isSelected 
+                                ? 'bg-brand-primary text-black border-brand-primary shadow-lg shadow-brand-primary/10' 
+                                : 'bg-black/40 text-neutral-400 border-white/5 hover:text-white hover:bg-neutral-800'
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (['Quest', 'Event', 'System'].includes(updateFrom)) {
+                            setUpdateFrom('');
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
+                          !['Quest', 'Event', 'System'].includes(updateFrom) 
+                            ? 'bg-neutral-800 text-white border-white/20' 
+                            : 'bg-black/40 text-neutral-400 border-white/5 hover:text-white hover:bg-neutral-800'
+                        }`}
+                      >
+                        Other (Ketik Sendiri)
+                      </button>
+                    </div>
                     <input
                       type="text"
                       value={updateFrom}
                       onChange={(e) => setUpdateFrom(e.target.value)}
-                      placeholder="e.g. Quest Reward, Shop Sale"
-                      className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none"
+                      placeholder={
+                        !['Quest', 'Event', 'System'].includes(updateFrom) 
+                          ? "Type 'From' source here..." 
+                          : "Selected: " + updateFrom
+                      }
+                      className="input-field mt-1"
                       required
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-neutral-300">Reason <span className="text-red-500">*</span></label>
+                    <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest px-1">Reason</label>
                     <input
                       type="text"
                       value={updateReason}
                       onChange={(e) => setUpdateReason(e.target.value)}
-                      placeholder="e.g. Completed daily quest"
-                      className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none"
+                      placeholder="e.g. Won Arena Match #42"
+                      className="input-field"
                       required
                     />
                   </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
-            <div className="mt-8 flex justify-end">
-                <button
+            <div className="mt-10 flex justify-end">
+              <button
                 onClick={handleSave}
                 disabled={!hasChanges || isSaving || (hasChanges && (!updateFrom.trim() || !updateReason.trim()))}
-                className={`px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all border ${
-                  hasChanges && updateFrom.trim() && updateReason.trim()
-                    ? 'bg-white hover:bg-neutral-200 text-black border-transparent shadow-[0_0_20px_rgba(255,255,255,0.05)] active:scale-95' 
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-600 cursor-not-allowed opacity-50'
-                }`}
+                className="btn-primary w-full sm:w-auto min-w-[200px]"
               >
                 <Save className="w-5 h-5" />
-                {isSaving ? 'Saving...' : 'Save Changes'}
+                {isSaving ? 'Processing...' : 'Save Stats'}
               </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      {character.isSystem && (
-        <div className="bg-neutral-900 rounded-3xl p-8 shadow-sm border border-neutral-800">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-white">Shop Security (PIN)</h2>
-            <button 
-              onClick={() => setShowPinSettings(!showPinSettings)}
-              className="text-indigo-400 hover:text-indigo-300 font-medium text-sm transition-colors"
-            >
-              {showPinSettings ? 'Cancel' : (character.pin ? 'Change/Remove PIN' : 'Set PIN')}
-            </button>
-          </div>
-          
-          {showPinSettings && (
-            <div className="space-y-4 max-w-md">
-              {pinSettingsError && <div className="p-3 bg-red-900/30 border border-red-900/50 text-red-400 rounded-xl text-sm">{pinSettingsError}</div>}
-              {pinSettingsSuccess && <div className="p-3 bg-emerald-900/30 border border-emerald-900/50 text-emerald-400 rounded-xl text-sm">{pinSettingsSuccess}</div>}
-              
-              {character.pin && (
+          {character.isSystem && (
+            <div className="glass-card p-8">
+              <div className="flex items-center justify-between mb-8">
                 <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-1">Current PIN</label>
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={oldPin}
-                    onChange={(e) => setOldPin(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none"
-                    placeholder="****"
-                  />
+                  <h3 className="text-xl font-display font-bold">Secure <span className="text-brand-primary">PIN</span></h3>
+                  <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">PIN Authorization</p>
                 </div>
-              )}
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">New PIN (Leave blank to remove)</label>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                  className="w-full px-4 py-2 border border-neutral-800 bg-black text-white placeholder-neutral-500 rounded-xl focus:ring-1 focus:ring-neutral-700 focus:outline-none"
-                  placeholder="****"
-                />
+                <button 
+                  onClick={() => setShowPinSettings(!showPinSettings)}
+                  className="text-xs font-bold uppercase tracking-widest text-brand-primary hover:underline underline-offset-4"
+                >
+                  {showPinSettings ? 'Close' : (character.pin ? 'Manage PIN' : 'Configure')}
+                </button>
               </div>
               
-                <button
-                onClick={handleUpdatePin}
-                className="px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold transition-all hover:shadow-lg hover:shadow-indigo-500/20 active:scale-95"
-              >
-                Save PIN Settings
-              </button>
+              <AnimatePresence>
+                {showPinSettings && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="space-y-6 overflow-hidden"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {character.pin && (
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Current PIN</label>
+                          <input
+                            type="password"
+                            maxLength={4}
+                            value={oldPin}
+                            onChange={(e) => setOldPin(e.target.value.replace(/\D/g, ''))}
+                            className="input-field tracking-[0.5em] text-center"
+                            placeholder="****"
+                          />
+                        </div>
+                      )}
+                      
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">New 4-Digit PIN</label>
+                        <input
+                          type="password"
+                          maxLength={4}
+                          value={newPin}
+                          onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                          className="input-field tracking-[0.5em] text-center"
+                          placeholder="****"
+                        />
+                      </div>
+                    </div>
+                    
+                    {pinSettingsError && <p className="text-xs text-red-500 font-bold uppercase tracking-widest">{pinSettingsError}</p>}
+                    {pinSettingsSuccess && <p className="text-xs text-emerald-500 font-bold uppercase tracking-widest">{pinSettingsSuccess}</p>}
+                    
+                    <button onClick={handleUpdatePin} className="btn-secondary w-full">
+                       Update PIN
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
         </div>
-      )}
+      </section>
 
-      <div className="bg-neutral-900 rounded-3xl p-8 shadow-sm border border-neutral-800">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <History className="w-5 h-5 text-indigo-400" />
-            Character Log History {isAdmin && <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded ml-2">ADMIN VIEW (ALL HISTORY)</span>}
-          </h2>
+      {/* History Log */}
+      <section className="space-y-6">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-3 underline decoration-brand-primary underline-offset-8">
+            <History className="w-5 h-5 text-brand-primary" />
+            <h2 className="text-xl font-display font-black uppercase italic tracking-tight">Record <span className="text-brand-primary">History</span></h2>
+          </div>
           {isAdmin && (
             <button 
               onClick={() => {
@@ -496,101 +626,133 @@ export default function CharacterDetail() {
                 a.download = `logs_${character.name}_${character.id}.csv`;
                 a.click();
               }}
-              className="text-xs text-neutral-400 hover:text-white transition-colors flex items-center gap-1"
+              className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:text-white transition-colors flex items-center gap-2"
             >
-              <Download className="w-3 h-3" /> Export Logs
+              <Download className="w-3 h-3" /> Export CSV
             </button>
           )}
         </div>
         
-        <div className="space-y-6">
-          {charLogs.map(log => (
+        <div className="grid grid-cols-1 gap-4">
+          {charLogs.map((log, index) => (
             <motion.div 
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.03 }}
               key={log.id} 
-              className="flex gap-4 p-4 rounded-2xl bg-black border border-neutral-800"
+              className="glass-card p-6 flex flex-col md:flex-row gap-6 border-white/5 hover:border-white/10 transition-colors"
             >
-              <div className="w-10 h-10 rounded-full bg-neutral-900 border border-neutral-800 shadow-sm flex items-center justify-center flex-shrink-0 text-neutral-400">
-                {log.action === 'CREATE' ? <Plus className="w-5 h-5 text-emerald-400" /> : log.action === 'UPDATE BY ADMIN' ? <Shield className="w-5 h-5 text-purple-400" /> : <Save className="w-5 h-5 text-indigo-400" />}
+              <div className="flex-shrink-0 flex md:flex-col items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-lg ${
+                  log.action === 'CREATE' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 
+                  log.action === 'UPDATE BY ADMIN' ? 'bg-brand-secondary/10 border-brand-secondary/20 text-brand-secondary' : 
+                  'bg-brand-primary/10 border-brand-primary/20 text-brand-primary'
+                }`}>
+                  {log.action === 'CREATE' ? <Plus className="w-6 h-6" /> : log.action === 'UPDATE BY ADMIN' ? <Shield className="w-6 h-6" /> : <Save className="w-6 h-6" />}
+                </div>
+                <div className="md:hidden flex-1">
+                   <p className="text-sm font-bold">{log.action === 'CREATE' ? 'Record Created' : log.action === 'UPDATE BY ADMIN' ? 'Admin Override' : 'Stats Updated'}</p>
+                   <p className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest">{formatDistanceToNow(log.timestamp)} ago</p>
+                </div>
               </div>
+
               <div className="flex-1">
-                <div className="flex justify-between items-start mb-2">
-                  <span className={`font-medium ${log.action === 'UPDATE BY ADMIN' ? 'text-purple-400' : 'text-white'}`}>
-                    {log.action === 'CREATE' ? 'Record Created' : log.action === 'UPDATE BY ADMIN' ? `Updated by Admin (${log.username || 'System'})` : 'Stats Updated'}
+                <div className="hidden md:flex justify-between items-center mb-4">
+                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${log.action === 'UPDATE BY ADMIN' ? 'text-brand-secondary' : 'text-neutral-500'}`}>
+                    {log.action === 'CREATE' ? 'Creation Event' : log.action === 'UPDATE BY ADMIN' ? `Authorized by ${log.username || 'Admin'}` : 'Manual Update'}
                   </span>
-                  <span className="text-sm text-neutral-500">{formatDistanceToNow(log.timestamp)} ago</span>
+                  <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">{formatDistanceToNow(log.timestamp)} ago</span>
                 </div>
                 
                 {(log.action === 'UPDATE' || log.action === 'UPDATE BY ADMIN') && log.oldData && log.newData && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                  <div className="flex flex-wrap gap-4 mb-4">
                     {Object.keys(log.newData).map(key => {
                       const k = key as keyof CharacterStats;
                       const oldVal = log.oldData![k];
                       const newVal = log.newData![k];
                       if (oldVal === newVal) return null;
                       return (
-                        <div key={k} className="flex items-center gap-2 bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800">
-                          <span className="text-neutral-500 capitalize w-16">{k}:</span>
-                          <span className="text-neutral-600 line-through">{oldVal}</span>
-                          <ArrowLeft className="w-3 h-3 text-neutral-600 rotate-180" />
-                          <span className="font-medium text-white">{newVal}</span>
-                          {renderDiff(oldVal || 0, newVal || 0)}
+                        <div key={k} className="bg-white/[0.02] border border-white/5 rounded-xl px-4 py-2 flex items-center gap-3">
+                          <span className="text-[10px] font-bold text-neutral-500 uppercase">{k}</span>
+                          <span className="text-xs font-bold text-white flex items-center gap-2">
+                             {oldVal} <ArrowLeft className="w-3 h-3 rotate-180" /> {newVal}
+                          </span>
+                          <div className="text-[10px]">
+                            {renderDiff(oldVal || 0, newVal || 0)}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 )}
-                {log.from && log.reason && (
-                  <div className="mt-3 text-sm bg-neutral-900 p-3 rounded-xl border border-neutral-800">
-                    <p className="mb-1"><span className="font-semibold text-neutral-400">From:</span> <span className="text-neutral-300">{log.from}</span></p>
-                    <p><span className="font-semibold text-neutral-400">Reason:</span> <span className="text-neutral-300">{log.reason}</span></p>
+                
+                {(log.from || log.reason) && (
+                  <div className="bg-white/[0.02] p-4 rounded-2xl border border-white/5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {log.from && (
+                        <div>
+                          <p className="text-[10px] text-neutral-500 font-bold uppercase mb-1">From</p>
+                          <p className="text-xs font-medium text-neutral-300">{log.from}</p>
+                        </div>
+                      )}
+                      {log.reason && (
+                        <div>
+                          <p className="text-[10px] text-neutral-500 font-bold uppercase mb-1">Reason</p>
+                          <p className="text-xs font-medium text-neutral-300">{log.reason}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             </motion.div>
           ))}
           {charLogs.length === 0 && (
-            <div className="text-center text-neutral-600 py-8">No history available.</div>
+            <div className="py-20 text-center glass-card border-dashed">
+              <History className="w-16 h-16 text-neutral-700 mx-auto mb-4 opacity-20" />
+              <p className="text-neutral-500 italic">No events recorded in history</p>
+            </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {showPinPrompt && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-neutral-900 rounded-3xl p-8 max-w-sm w-full shadow-2xl border border-neutral-800 text-white">
-            <h3 className="text-xl font-bold mb-4">Enter Shop PIN</h3>
-            <p className="text-sm text-neutral-400 mb-6">This system account requires a PIN to update stats.</p>
-            
-            {pinError && <div className="p-3 bg-red-900/30 border border-red-900/50 text-red-400 rounded-xl text-sm mb-4">{pinError}</div>}
-            
-            <input
-              type="password"
-              maxLength={4}
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
-              className="w-full px-4 py-3 border border-neutral-800 rounded-xl bg-black focus:ring-1 focus:ring-neutral-700 outline-none mb-6 text-center text-2xl tracking-widest text-white"
-              placeholder="****"
-              autoFocus
-            />
-            
-            <div className="flex gap-4">
-              <button
-                onClick={() => setShowPinPrompt(false)}
-                className="flex-1 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="flex-1 px-4 py-3 bg-white hover:bg-neutral-200 text-black rounded-xl font-bold transition-all active:scale-95 shadow-lg"
-              >
-                Verify & Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* PIN Prompt Modal */}
+      <AnimatePresence>
+        {showPinPrompt && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-50 p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="glass-card p-10 max-w-sm w-full border-white/10"
+            >
+              <h3 className="text-2xl font-display font-black text-center mb-2">PIN <span className="text-brand-primary">REQUIRED</span></h3>
+              <p className="text-xs text-neutral-500 text-center font-bold uppercase tracking-widest mb-8">Verification Required</p>
+              
+              {pinError && <p className="text-xs text-red-500 font-bold text-center uppercase tracking-widest mb-4">{pinError}</p>}
+              
+              <input
+                type="password"
+                maxLength={4}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                className="input-field text-3xl tracking-[1em] text-center mb-8 py-5 border-white/10 bg-black"
+                placeholder="****"
+                autoFocus
+              />
+              
+              <div className="flex gap-4">
+                <button onClick={() => setShowPinPrompt(false)} className="btn-secondary flex-1">Cancel</button>
+                <button onClick={handleSave} className="btn-primary flex-1">Verify</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

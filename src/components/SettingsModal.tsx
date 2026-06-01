@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Shield, Key, AlertCircle, CheckCircle2, User, Trash2 } from 'lucide-react';
+import { X, Shield, Key, AlertCircle, CheckCircle2, User, Trash2, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useData } from '../contexts/DataContext';
 import { updatePassword, deleteUser as deleteAuthUser } from 'firebase/auth';
@@ -283,6 +283,27 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
           )}
+
+          {/* Terminate Session Section */}
+          <div className="space-y-4 pt-6 border-t border-neutral-800">
+            <div className="flex items-center gap-2 text-white font-bold">
+              <LogOut className="w-5 h-5 text-amber-500" />
+              <h3>Session Protocol</h3>
+            </div>
+            <p className="text-sm text-neutral-500">
+              Disconnect safely from your Allyssea terminal session. This will clear your temporary cached cookies.
+            </p>
+            <button
+              onClick={async () => {
+                onClose();
+                await logout();
+              }}
+              className="w-full py-3 bg-neutral-850 hover:bg-red-950/20 text-neutral-200 hover:text-red-400 border border-neutral-800 hover:border-red-900/30 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out Terminals
+            </button>
+          </div>
 
           {/* Delete Account Section */}
           <div className="space-y-4 pt-6 border-t border-neutral-800">

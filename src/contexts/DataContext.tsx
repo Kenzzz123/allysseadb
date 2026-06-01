@@ -1,55 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from './AuthContext';
-import { auth } from '../lib/firebase';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export interface CharacterStats {
   level: number;
@@ -63,6 +15,7 @@ export interface Character {
   id: string;
   userId: string;
   name: string;
+  keywords?: string[];
   isSystem?: boolean;
   pin?: string;
   stats: CharacterStats;
@@ -121,6 +74,9 @@ interface DataContextType {
   allTransactions: Transaction[]; // For admin
   adminWarnings: AdminWarning[]; // For admin
   priorityItems: {id: string, type: 'stat' | 'trans'}[];
+  hasQuotaError: boolean;
+  countdown: string;
+  nextRefresh: number;
   refreshLeaderboard: () => Promise<void>;
   clearPriority: (id: string) => void;
   searchCharacters: (query: string) => Promise<Character[]>;
@@ -138,6 +94,13 @@ interface DataContextType {
   resetEconomy: () => Promise<void>;
   resetAllProgress: () => Promise<void>;
   createTransaction: (senderCharId: string, recipientCharId: string, amount: number, reason: string) => Promise<void>;
+  setAdminPanelActive: (active: boolean) => void;
+  setAllTransactionsActive: (active: boolean) => void;
+  morningHour: number;
+  morningMinute: number;
+  eveningHour: number;
+  eveningMinute: number;
+  updateLeaderboardHours: (morningHour: number, morningMinute: number, eveningHour: number, eveningMinute: number) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -161,74 +124,291 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [adminWarnings, setAdminWarnings] = useState<AdminWarning[]>([]);
   const [priorityItems, setPriorityItems] = useState<{id: string, type: 'stat' | 'trans'}[]>([]);
+  const [hasQuotaError, setHasQuotaError] = useState(false);
+  const [nextRefresh, setNextRefresh] = useState<number>(0);
+  const [countdown, setCountdown] = useState<string>('00:00:00');
+  const [adminPanelActive, setAdminPanelActive] = useState(false);
+  const [allTransactionsActive, setAllTransactionsActive] = useState(false);
+  const [morningHour, setMorningHour] = useState<number>(9);
+  const [morningMinute, setMorningMinute] = useState<number>(0);
+  const [eveningHour, setEveningHour] = useState<number>(21);
+  const [eveningMinute, setEveningMinute] = useState<number>(0);
 
-  const fetchLeaderboard = async () => {
+  const isFetchingRef = React.useRef(false);
+  const lastAutoFetchRef = React.useRef<number>(0);
+
+  const calculateNextRefresh = (
+    mHour: number = morningHour,
+    mMin: number = morningMinute,
+    eHour: number = eveningHour,
+    eMin: number = eveningMinute
+  ) => {
+    const now = new Date();
+    const wibOffset = 7 * 60; // WIB is UTC+7
+    const utcNow = new Date(now.getTime() + (now.getTimezoneOffset() * 60000));
+    const wibNow = new Date(utcNow.getTime() + (wibOffset * 60000));
+    
+    // Set targets: mHour:mMin and eHour:eMin WIB
+    const morningTarget = new Date(wibNow);
+    morningTarget.setHours(mHour, mMin, 0, 0);
+    
+    const eveningTarget = new Date(wibNow);
+    eveningTarget.setHours(eHour, eMin, 0, 0);
+    
+    let next: Date;
+    if (wibNow < morningTarget) {
+      next = morningTarget;
+    } else if (wibNow < eveningTarget) {
+      next = eveningTarget;
+    } else {
+      next = new Date(morningTarget.getTime() + 24 * 60 * 60 * 1000);
+    }
+    
+    // Convert WIB target back to local machine time
+    const nextLocal = new Date(next.getTime() - (wibOffset * 60000) - (now.getTimezoneOffset() * 60000));
+    return nextLocal.getTime();
+  };
+
+  const fetchLeaderboard = async (
+    force: boolean = false, 
+    mHour?: number, 
+    mMin?: number, 
+    eHour?: number, 
+    eMin?: number
+  ) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     try {
-      const { getDocs } = await import('firebase/firestore');
+      const { getDocs, getDoc, setDoc: firestoreSetDoc } = await import('firebase/firestore');
       
-      const qVela = query(
-        collection(db, 'characters'), 
-        where('isSystem', '==', false),
-        orderBy('stats.vela', 'desc'), 
-        limit(50)
-      );
-      const qLevel = query(
-        collection(db, 'characters'), 
-        where('isSystem', '==', false),
-        orderBy('stats.level', 'desc'), 
-        limit(50)
-      );
+      const lbRef = doc(db, 'system', 'leaderboard');
+      const lbSnap = await getDoc(lbRef);
+      const now = Date.now();
+      
+      // If not forcing (admin refresh) and not reached next refresh time, 
+      // just try to load from the cache if available.
+      if (!force && lbSnap.exists()) {
+        const data = lbSnap.data();
+        if (data.nextRefresh && now < data.nextRefresh) {
+          setTopVela(data.topVela || []);
+          setTopLevel(data.topLevel || []);
+          setNextRefresh(data.nextRefresh);
+          if (typeof data.morningHour === 'number') setMorningHour(data.morningHour);
+          if (typeof data.morningMinute === 'number') setMorningMinute(data.morningMinute);
+          if (typeof data.eveningHour === 'number') setEveningHour(data.eveningHour);
+          if (typeof data.eveningMinute === 'number') setEveningMinute(data.eveningMinute);
+          return;
+        }
+      }
 
-      const [velaSnap, levelSnap] = await Promise.all([
-        getDocs(qVela),
-        getDocs(qLevel)
-      ]);
+      // If we reach here, we need to perform a real refresh.
+      // ONLY ADMIN can perform the refresh to Firestore.
+      // Players will just use the latest data and wait for an admin or schedule (simulated here)
+      
+      if (userProfile?.role === 'admin' || force) {
+        const qVela = query(
+          collection(db, 'characters'), 
+          where('isSystem', '==', false),
+          orderBy('stats.vela', 'desc'), 
+          limit(50)
+        );
+        const qLevel = query(
+          collection(db, 'characters'), 
+          where('isSystem', '==', false),
+          orderBy('stats.level', 'desc'), 
+          limit(50)
+        );
 
-      setTopVela(velaSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character)));
-      setTopLevel(levelSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character)));
-    } catch (error) {
+        const [velaSnap, levelSnap] = await Promise.all([
+          getDocs(qVela),
+          getDocs(qLevel)
+        ]);
+
+        const newTopVela = velaSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
+        const newTopLevel = levelSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
+        
+        const finalMorningHour = typeof mHour === 'number' ? mHour : morningHour;
+        const finalMorningMinute = typeof mMin === 'number' ? mMin : morningMinute;
+        const finalEveningHour = typeof eHour === 'number' ? eHour : eveningHour;
+        const finalEveningMinute = typeof eMin === 'number' ? eMin : eveningMinute;
+        const refreshTime = calculateNextRefresh(finalMorningHour, finalMorningMinute, finalEveningHour, finalEveningMinute);
+
+        const lbData = {
+          topVela: newTopVela,
+          topLevel: newTopLevel,
+          lastRefresh: now,
+          nextRefresh: refreshTime,
+          morningHour: finalMorningHour,
+          morningMinute: finalMorningMinute,
+          eveningHour: finalEveningHour,
+          eveningMinute: finalEveningMinute,
+          updatedBy: currentUser?.uid || 'system'
+        };
+
+        // Update local state
+        setTopVela(newTopVela);
+        setTopLevel(newTopLevel);
+        setNextRefresh(refreshTime);
+
+        // Update Firestore for everyone
+        await firestoreSetDoc(lbRef, lbData);
+      } else {
+        // Player: try to get the latest even if expired (maybe no admin logged in)
+        if (lbSnap.exists()) {
+          const data = lbSnap.data();
+          setTopVela(data.topVela || []);
+          setTopLevel(data.topLevel || []);
+          const mH = typeof data.morningHour === 'number' ? data.morningHour : morningHour;
+          const mM = typeof data.morningMinute === 'number' ? data.morningMinute : morningMinute;
+          const eH = typeof data.eveningHour === 'number' ? data.eveningHour : eveningHour;
+          const eM = typeof data.eveningMinute === 'number' ? data.eveningMinute : eveningMinute;
+          setNextRefresh(data.nextRefresh || calculateNextRefresh(mH, mM, eH, eM));
+          if (typeof data.morningHour === 'number') setMorningHour(data.morningHour);
+          if (typeof data.morningMinute === 'number') setMorningMinute(data.morningMinute);
+          if (typeof data.eveningHour === 'number') setEveningHour(data.eveningHour);
+          if (typeof data.eveningMinute === 'number') setEveningMinute(data.eveningMinute);
+        }
+      }
+    } catch (error: any) {
+      if (error?.message?.includes('Quota exceeded')) {
+        setHasQuotaError(true);
+      }
       console.error("Leaderboard fetch error:", error);
+    } finally {
+      isFetchingRef.current = false;
     }
   };
 
   useEffect(() => {
-    fetchLeaderboard();
-    // Refresh every 10 minutes to save budget
-    const interval = setInterval(fetchLeaderboard, 10 * 60 * 1000);
+    if (!currentUser) return;
+
+    // Listen to universal leaderboard doc for all users
+    const lbRef = doc(db, 'system', 'leaderboard');
+    const unsubLb = onSnapshot(lbRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setTopVela(data.topVela || []);
+        setTopLevel(data.topLevel || []);
+        const mH = typeof data.morningHour === 'number' ? data.morningHour : 9;
+        const mM = typeof data.morningMinute === 'number' ? data.morningMinute : 0;
+        const eH = typeof data.eveningHour === 'number' ? data.eveningHour : 21;
+        const eM = typeof data.eveningMinute === 'number' ? data.eveningMinute : 0;
+        setMorningHour(mH);
+        setMorningMinute(mM);
+        setEveningHour(eH);
+        setEveningMinute(eM);
+        const nRef = data.nextRefresh || calculateNextRefresh(mH, mM, eH, eM);
+        setNextRefresh(nRef);
+      } else {
+        // If doc doesn't exist, try initial fetch
+        fetchLeaderboard();
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'system/leaderboard');
+    });
+
+    return () => unsubLb();
+  }, [currentUser]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      // Update countdown
+      if (nextRefresh > 0) {
+        const diff = Math.max(0, nextRefresh - now);
+        const h = Math.floor(diff / (1000 * 60 * 60));
+        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const s = Math.floor((diff % (1000 * 60)) / 1000);
+        setCountdown(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+        
+        // Auto fetch if expired and user is admin (to trigger sync for others)
+        if (diff <= 0 && userProfile?.role === 'admin' && !isFetchingRef.current) {
+          const currentTime = Date.now();
+          // Gatekeeper: only allow auto-fetch once every 30 seconds if expired
+          if (currentTime - lastAutoFetchRef.current > 30000) {
+            lastAutoFetchRef.current = currentTime;
+            fetchLeaderboard();
+          }
+        }
+      }
+    }, 1000);
+
     return () => clearInterval(interval);
-  }, []);
+  }, [nextRefresh, userProfile?.role]);
 
   const searchCharacters = async (queryStr: string) => {
-    if (!queryStr || queryStr.length < 2) return [];
+    if (!queryStr || queryStr.length < 1) return [];
+    const lowerQuery = queryStr.toLowerCase().trim();
     try {
       const { getDocs } = await import('firebase/firestore');
       
+      // We'll perform a broad search and then filter locally for better UX
+      // since Firestore doesn't support easy "contains" on strings.
+      
+      // 1. Prefix search by name (already good for "Ayam...")
       const qByName = query(
         collection(db, 'characters'),
         where('name', '>=', queryStr),
         where('name', '<=', queryStr + '\uf8ff'),
-        limit(10)
+        limit(20)
       );
       
-      // Also try searching by ID directly if it looks like one
+      // 2. Keyword search (exact match on elements like "Goreng")
+      const qByKeyword = query(
+        collection(db, 'characters'),
+        where('keywords', 'array-contains', lowerQuery),
+        limit(50)
+      );
+      
+      // 3. Search by ID
       const qById = query(
         collection(db, 'characters'),
-        where('__name__', '>=', queryStr),
-        where('__name__', '<=', queryStr + '\uf8ff'),
+        where('__name__', '==', queryStr),
         limit(5)
       );
 
-      const [nameSnap, idSnap] = await Promise.all([getDocs(qByName), getDocs(qById)]);
+      const [nameSnap, keywordSnap, idSnap] = await Promise.all([
+        getDocs(qByName), 
+        getDocs(qByKeyword),
+        getDocs(qById)
+      ]);
       
       const resultsMap = new Map<string, Character>();
-      nameSnap.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() } as Character));
-      idSnap.docs.forEach(doc => resultsMap.set(doc.id, { id: doc.id, ...doc.data() } as Character));
+      
+      const addRes = (doc: any) => {
+        const data = doc.data() as Character;
+        // Local filtering to ensure "contains" behavior if it wasn't a perfect prefix match
+        if (
+          data.name.toLowerCase().includes(lowerQuery) || 
+          data.id.toLowerCase().includes(lowerQuery) ||
+          data.keywords?.some(k => k.includes(lowerQuery))
+        ) {
+          resultsMap.set(doc.id, { id: doc.id, ...data });
+        }
+      };
+
+      nameSnap.docs.forEach(addRes);
+      keywordSnap.docs.forEach(addRes);
+      idSnap.docs.forEach(addRes);
       
       return Array.from(resultsMap.values());
     } catch (err) {
       console.error("Search characters error:", err);
       return [];
     }
+  };
+
+  const generateKeywords = (name: string) => {
+    const keywords = new Set<string>();
+    const words = name.toLowerCase().split(/\s+/);
+    words.forEach(word => {
+      if (word.length > 0) {
+        keywords.add(word);
+        // Add partials? For "Goreng", we already have it.
+        // If they want "reng" to find "Goreng", we'd need more logic, but "contains word" is usually what they mean.
+      }
+    });
+    return Array.from(keywords);
   };
 
   useEffect(() => {
@@ -247,38 +427,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubChars = onSnapshot(qChars, (snapshot) => {
       const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
       setCharacters(charsData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'characters');
     });
 
-    // Listen to user's logs - Limited to 50
-    const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(50));
+    // Listen to user's logs - Limited to 20
+    const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
     const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
       setLogs(logsData);
     }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        setHasQuotaError(true);
+        console.warn('Quota exceeded for logs listener. Real-time updates paused.');
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, 'logs');
     });
 
     // Listen to user's transactions (where user is sender or recipient)
-    const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(30));
-    const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(30));
+    const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
+    const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
     
-    let userTransMap = new Map<string, Transaction>();
-    
-      const updateTrans = () => {
-        const sorted = Array.from(userTransMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        setTransactions(sorted);
-      };
+    let senderTransList: Transaction[] = [];
+    let recipientTransList: Transaction[] = [];
+
+    const updateTransList = () => {
+      const combined = [...senderTransList, ...recipientTransList];
+      // remove duplicates
+      const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
+      const sorted = unique.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setTransactions(sorted);
+    };
+
     const unsubTransSender = onSnapshot(qTransSender, (snapshot) => {
-      snapshot.docs.forEach(doc => userTransMap.set(doc.id, { id: doc.id, ...doc.data() } as Transaction));
-      updateTrans();
+      senderTransList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
+      updateTransList();
     }, (error) => {
+      if (error.message.includes('Quota exceeded')) {
+        setHasQuotaError(true);
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, 'transactions');
     });
     
     const unsubTransRecipient = onSnapshot(qTransRecipient, (snapshot) => {
-      snapshot.docs.forEach(doc => userTransMap.set(doc.id, { id: doc.id, ...doc.data() } as Transaction));
-      updateTrans();
+      recipientTransList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
+      updateTransList();
     }, (error) => {
+      if (error.message.includes('Quota exceeded')) return;
       handleFirestoreError(error, OperationType.GET, 'transactions');
     });
 
@@ -288,38 +485,36 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubAllTrans = () => {};
     let unsubAdminWarnings = () => {};
 
-    // If admin, listen to all logs, users, and transactions
-    if (userProfile?.role === 'admin') {
-      const qAllChars = query(collection(db, 'characters'), limit(2000));
+    // If admin AND the admin panel is active, listen to all characters, logs, users, and warnings to avoid infinite reads
+    if (userProfile?.role === 'admin' && adminPanelActive) {
+      const qAllChars = query(collection(db, 'characters'), limit(500));
       unsubAllChars = onSnapshot(qAllChars, (snapshot) => {
         const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
         setAllCharacters(charsData);
       }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'characters');
+        if (!error.message.includes('Quota exceeded')) {
+          handleFirestoreError(error, OperationType.LIST, 'characters');
+        }
       });
 
-      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(1000));
+      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(300));
       unsubAllLogs = onSnapshot(qAllLogs, (snapshot) => {
         const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
         setAllLogs(logsData);
       }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'logs');
+        if (!error.message.includes('Quota exceeded')) {
+          handleFirestoreError(error, OperationType.LIST, 'logs');
+        }
       });
 
-      const qAllUsers = query(collection(db, 'users'), limit(1000));
+      const qAllUsers = query(collection(db, 'users'), limit(300));
       unsubAllUsers = onSnapshot(qAllUsers, (snapshot) => {
         const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAllUsers(usersData);
       }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'users');
-      });
-
-      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(1000));
-      unsubAllTrans = onSnapshot(qAllTrans, (snapshot) => {
-        const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-        setAllTransactions(transData);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'transactions');
+        if (!error.message.includes('Quota exceeded')) {
+          handleFirestoreError(error, OperationType.LIST, 'users');
+        }
       });
 
       const qWarnings = query(collection(db, 'admin_warnings'), orderBy('timestamp', 'desc'), limit(50));
@@ -328,6 +523,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAdminWarnings(warningsData);
       }, (error) => {
         handleFirestoreError(error, OperationType.LIST, 'admin_warnings');
+      });
+    }
+
+    // Separate listener for all transactions so they are only loaded when viewing All Transactions or on Admin Panel
+    if (userProfile?.role === 'admin' && (adminPanelActive || allTransactionsActive)) {
+      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(300));
+      unsubAllTrans = onSnapshot(qAllTrans, (snapshot) => {
+        const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
+        setAllTransactions(transData);
+      }, (error) => {
+        if (!error.message.includes('Quota exceeded')) {
+          handleFirestoreError(error, OperationType.LIST, 'transactions');
+        }
       });
     }
 
@@ -342,7 +550,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubAllTrans();
       unsubAdminWarnings();
     };
-  }, [currentUser, userProfile]);
+  }, [currentUser?.uid, userProfile?.role, adminPanelActive, allTransactionsActive]);
 
   const createCharacter = async (name: string, stats: CharacterStats) => {
     if (!currentUser) return;
@@ -351,6 +559,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newChar: Omit<Character, 'id'> = {
       userId: currentUser.uid,
       name,
+      keywords: generateKeywords(name),
       stats,
       isSystem: userProfile?.role === 'system',
       createdAt: now,
@@ -439,6 +648,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     await setDoc(doc(db, 'characters', id), {
       name: newName,
+      keywords: generateKeywords(newName),
       updatedAt: now,
     }, { merge: true });
 
@@ -649,100 +859,136 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createTransaction = async (senderCharId: string, recipientCharId: string, amount: number, reason: string) => {
     if (!currentUser) return;
     
-    // We need to fetch the latest data for both characters to ensure we have the correct Vela amounts
-    // Since this is client-side, we'll use the data we have in state, but ideally this should be a transaction in Firestore
-    // For simplicity in this app, we'll just update both documents.
-    
-    const senderChar = characters.find(c => c.id === senderCharId);
-    // Recipient could be any character, so we need to search allCharacters if admin, or we might need to fetch it if not admin.
-    // Wait, if the user is not admin, they don't have `allCharacters`.
-    // We need to fetch the recipient character directly from Firestore.
-    const { getDoc } = await import('firebase/firestore');
-    const recipientRef = doc(db, 'characters', recipientCharId);
-    const recipientSnap = await getDoc(recipientRef);
-    
-    if (!senderChar || !recipientSnap.exists()) {
-      throw new Error("Sender or recipient character not found.");
+    try {
+      const senderChar = characters.find(c => c.id === senderCharId);
+      const { getDoc, writeBatch } = await import('firebase/firestore');
+      const recipientRef = doc(db, 'characters', recipientCharId);
+      const recipientSnap = await getDoc(recipientRef);
+      
+      if (!senderChar || !recipientSnap.exists()) {
+        throw new Error("Sender or recipient character not found.");
+      }
+      
+      const recipientChar = { id: recipientSnap.id, ...recipientSnap.data() } as Character;
+      
+      if (senderChar.stats.vela < amount) {
+        throw new Error("Insufficient Vela.");
+      }
+
+      const now = Date.now();
+      const batch = writeBatch(db);
+
+      // Update sender
+      const newSenderStats = {
+        ...senderChar.stats,
+        vela: senderChar.stats.vela - amount,
+        totalExpense: (senderChar.stats.totalExpense || 0) + amount
+      };
+      batch.update(doc(db, 'characters', senderCharId), {
+        stats: newSenderStats,
+        updatedAt: now
+      });
+
+      // Update recipient
+      const newRecipientStats = {
+        ...recipientChar.stats,
+        vela: (recipientChar.stats.vela || 0) + amount,
+        totalIncome: (recipientChar.stats.totalIncome || 0) + amount
+      };
+      batch.update(doc(db, 'characters', recipientCharId), {
+        stats: newRecipientStats,
+        updatedAt: now
+      });
+
+      // Create transaction record
+      const transRef = doc(collection(db, 'transactions'));
+      batch.set(transRef, {
+        senderCharId,
+        senderCharName: senderChar.name,
+        senderUserId: senderChar.userId,
+        recipientCharId,
+        recipientCharName: recipientChar.name,
+        recipientUserId: recipientChar.userId,
+        amount,
+        reason,
+        timestamp: now
+      });
+
+      // Create log for sender
+      const senderLogRef = doc(collection(db, 'logs'));
+      batch.set(senderLogRef, {
+        charId: senderCharId,
+        charName: senderChar.name,
+        userId: senderChar.userId,
+        username: userProfile?.username || 'Unknown',
+        action: 'UPDATE',
+        oldData: senderChar.stats,
+        newData: newSenderStats,
+        timestamp: now,
+      });
+
+      // Create log for recipient
+      const recipientLogRef = doc(collection(db, 'logs'));
+      batch.set(recipientLogRef, {
+        charId: recipientCharId,
+        charName: recipientChar.name,
+        userId: recipientChar.userId,
+        username: 'System (Transfer)',
+        action: 'UPDATE',
+        oldData: recipientChar.stats,
+        newData: newRecipientStats,
+        timestamp: now,
+      });
+
+      await batch.commit();
+
+      // Priority Check for Transfers > 100,000
+      if (amount > 100000) {
+        setPriorityItems(prev => [...prev, { id: transRef.id, type: 'trans' }]);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'transactions');
     }
-    
-    const recipientChar = { id: recipientSnap.id, ...recipientSnap.data() } as Character;
-    
-    if (senderChar.stats.vela < amount) {
-      throw new Error("Insufficient Vela.");
+  };
+
+  const updateLeaderboardHours = async (mH: number, mM: number, eH: number, eM: number) => {
+    try {
+      const { setDoc: firestoreSetDoc } = await import('firebase/firestore');
+      const lbRef = doc(db, 'system', 'leaderboard');
+      
+      setMorningHour(mH);
+      setMorningMinute(mM);
+      setEveningHour(eH);
+      setEveningMinute(eM);
+      const nextTime = calculateNextRefresh(mH, mM, eH, eM);
+      setNextRefresh(nextTime);
+      
+      await firestoreSetDoc(lbRef, {
+        morningHour: mH,
+        morningMinute: mM,
+        eveningHour: eH,
+        eveningMinute: eM,
+        nextRefresh: nextTime
+      }, { merge: true });
+      
+      await fetchLeaderboard(true, mH, mM, eH, eM);
+    } catch (err) {
+      console.error("Failed to update leaderboard hours:", err);
     }
-
-    const now = Date.now();
-    
-    // Update sender
-    const newSenderStats = {
-      ...senderChar.stats,
-      vela: senderChar.stats.vela - amount,
-      totalExpense: (senderChar.stats.totalExpense || 0) + amount
-    };
-    await setDoc(doc(db, 'characters', senderCharId), {
-      stats: newSenderStats,
-      updatedAt: now
-    }, { merge: true });
-
-    // Update recipient
-    const newRecipientStats = {
-      ...recipientChar.stats,
-      vela: recipientChar.stats.vela + amount,
-      totalIncome: (recipientChar.stats.totalIncome || 0) + amount
-    };
-    await setDoc(doc(db, 'characters', recipientCharId), {
-      stats: newRecipientStats,
-      updatedAt: now
-    }, { merge: true });
-
-    // Create transaction record
-    const transRef = doc(collection(db, 'transactions'));
-    await setDoc(transRef, {
-      senderCharId,
-      senderCharName: senderChar.name,
-      senderUserId: senderChar.userId,
-      recipientCharId,
-      recipientCharName: recipientChar.name,
-      recipientUserId: recipientChar.userId,
-      amount,
-      reason,
-      timestamp: now
-    });
-
-    // Priority Check for Transfers > 100,000
-    if (amount > 100000) {
-      setPriorityItems(prev => [...prev, { id: transRef.id, type: 'trans' }]);
-    }
-
-    // Create log for sender
-    const senderLogRef = doc(collection(db, 'logs'));
-    await setDoc(senderLogRef, {
-      charId: senderCharId,
-      charName: senderChar.name,
-      userId: senderChar.userId,
-      username: userProfile?.username || 'Unknown',
-      action: 'UPDATE',
-      oldData: senderChar.stats,
-      newData: newSenderStats,
-      timestamp: now,
-    });
-
-    // Create log for recipient
-    const recipientLogRef = doc(collection(db, 'logs'));
-    await setDoc(recipientLogRef, {
-      charId: recipientCharId,
-      charName: recipientChar.name,
-      userId: recipientChar.userId,
-      username: 'System (Transfer)',
-      action: 'UPDATE',
-      oldData: recipientChar.stats,
-      newData: newRecipientStats,
-      timestamp: now,
-    });
   };
 
   return (
-    <DataContext.Provider value={{ characters, topVela, topLevel, allCharacters, allUsers, logs, allLogs, transactions, allTransactions, adminWarnings, priorityItems, refreshLeaderboard: fetchLeaderboard, clearPriority, searchCharacters, createCharacter, updateCharacter, renameCharacter, updateCharacterPin, deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, clearAllLogs, dismissWarning, resetEconomy, resetAllProgress, createTransaction }}>
+    <DataContext.Provider value={{ 
+      characters, topVela, topLevel, allCharacters, allUsers, logs, allLogs, 
+      transactions, allTransactions, adminWarnings, priorityItems, hasQuotaError, 
+      countdown, nextRefresh,
+      refreshLeaderboard: () => fetchLeaderboard(true), clearPriority, searchCharacters, 
+      createCharacter, updateCharacter, renameCharacter, updateCharacterPin, 
+      deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, 
+      clearAllLogs, dismissWarning, resetEconomy, resetAllProgress, createTransaction,
+      setAdminPanelActive, setAllTransactionsActive,
+      morningHour, morningMinute, eveningHour, eveningMinute, updateLeaderboardHours
+    }}>
       {children}
     </DataContext.Provider>
   );

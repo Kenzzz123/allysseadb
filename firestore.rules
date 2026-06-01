@@ -53,10 +53,13 @@ service cloud.firestore {
 
     function isValidCharacter(data) {
       return (!('name' in data) || (data.name is string && data.name.size() <= 50)) &&
+             (!('keywords' in data) || (data.keywords is list && data.keywords.size() <= 20)) &&
              (!('stats' in data) || (data.stats is map && data.stats.keys().hasAll(['level', 'karmaPoint', 'vela', 'totalIncome', 'totalExpense']))) &&
              (!('userId' in data) || (data.userId is string && data.userId.size() <= 128)) &&
              (!('createdAt' in data) || (data.createdAt is number)) &&
-             (!('updatedAt' in data) || (data.updatedAt is number));
+             (!('updatedAt' in data) || (data.updatedAt is number)) &&
+             (!('isSystem' in data) || (data.isSystem is bool)) &&
+             (!('pin' in data) || (data.pin == null || (data.pin is string && data.pin.size() == 4)));
     }
 
     function isValidLog(data) {
@@ -92,13 +95,13 @@ service cloud.firestore {
     match /characters/{charId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidCharacter(incoming()) && 
-                    incoming().keys().hasAll(['userId', 'name', 'stats', 'createdAt', 'updatedAt']) &&
+                    incoming().keys().hasAll(['userId', 'name', 'stats', 'createdAt', 'updatedAt', 'keywords']) &&
                     incoming().userId == request.auth.uid;
       allow update: if isSignedIn() && isValidCharacter(incoming()) && (
         isAdmin() || 
         (existing().userId == request.auth.uid && incoming().get('userId', request.auth.uid) == request.auth.uid && (
           // Action: Rename or update pin
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pin', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pin', 'updatedAt', 'keywords']) ||
           // Action: Update stats
           incoming().diff(existing()).affectedKeys().hasOnly(['stats', 'updatedAt'])
         )) ||
@@ -111,7 +114,7 @@ service cloud.firestore {
 
     // Logs
     match /logs/{logId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidLog(incoming());
       allow delete: if isAdmin();
     }
@@ -121,6 +124,12 @@ service cloud.firestore {
       allow read: if isAdmin() || (isSignedIn() && (resource.data.senderUserId == request.auth.uid || resource.data.recipientUserId == request.auth.uid));
       allow create: if isSignedIn() && isValidTransaction(incoming()) && incoming().senderUserId == request.auth.uid;
       allow delete: if isAdmin();
+    }
+
+    // System Collection (Leaderboards, etc)
+    match /system/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // Banned Emails
