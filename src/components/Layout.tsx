@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export default function Layout() {
   const { currentUser, userProfile, logout } = useAuth();
-  const { adminWarnings } = useData();
+  const { adminWarnings, totalReadsSaved, isSyncingData, forceSyncAll } = useData();
   const navigate = useNavigate();
   const location = useLocation();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -128,6 +128,35 @@ export default function Layout() {
             );
           })}
         </div>
+
+        {currentUser && (
+          <div className="mt-auto hidden xl:flex flex-col gap-3 bg-neutral-900/60 rounded-3xl p-4 border border-white/5 shadow-inner">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">Quota Optimizer</span>
+              <span className="flex h-2 w-2 relative">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isSyncingData ? 'bg-amber-400' : 'bg-emerald-400'}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isSyncingData ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+              </span>
+            </div>
+
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-neutral-500 font-mono font-bold leading-none">DATABASE READS SAVED</div>
+              <div className="text-xl font-black text-emerald-400 font-mono tracking-tight flex items-baseline gap-1">
+                {totalReadsSaved.toLocaleString()}
+                <span className="text-[9px] font-sans font-normal text-neutral-400">docs</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => forceSyncAll(true)}
+              disabled={isSyncingData}
+              className="w-full flex items-center justify-center gap-2 bg-neutral-800 text-white hover:bg-neutral-700 disabled:opacity-50 text-xs font-bold py-2.5 px-3 rounded-2xl transition-all cursor-pointer active:scale-95"
+            >
+              <Settings className={`w-3.5 h-3.5 ${isSyncingData ? 'animate-spin' : ''}`} />
+              {isSyncingData ? 'Syncing...' : 'Sync Server Now'}
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main Content */}

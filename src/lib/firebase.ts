@@ -1,10 +1,18 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Initialize Firestore with client-side persistent cache (IndexedDB)
+// This stores queries locally and loads from cache, saving massive Firestore Read quota units.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+}, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -42,6 +50,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   if (isPermissionError && isUnauthenticated) {
     console.warn(`Transient unauthenticated Firestore permission error during logout/transition on path: ${path}, operation: ${operationType}`);
     return;
+  }
+
+  const isQuotaError = errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('exhausted');
+  if (isQuotaError && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
   }
 
   const errInfo: FirestoreErrorInfo = {

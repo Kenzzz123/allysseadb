@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, orderBy, limit, getDocs, getDocsFromCache, getDocsFromServer } from 'firebase/firestore';
 import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 
@@ -101,6 +101,10 @@ interface DataContextType {
   eveningHour: number;
   eveningMinute: number;
   updateLeaderboardHours: (morningHour: number, morningMinute: number, eveningHour: number, eveningMinute: number) => Promise<void>;
+  totalReadsSaved: number;
+  isSyncingData: boolean;
+  forceSyncAll: (forceServer?: boolean) => Promise<void>;
+  lastSyncTimes: Record<string, number>;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -133,6 +137,23 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [morningMinute, setMorningMinute] = useState<number>(0);
   const [eveningHour, setEveningHour] = useState<number>(21);
   const [eveningMinute, setEveningMinute] = useState<number>(0);
+
+  const [totalReadsSaved, setTotalReadsSaved] = useState<number>(() => {
+    const saved = localStorage.getItem('firestore_reads_saved');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [isSyncingData, setIsSyncingData] = useState(false);
+  const [lastSyncTimes, setLastSyncTimes] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setHasQuotaError(true);
+    };
+    window.addEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
 
   const isFetchingRef = React.useRef(false);
   const lastAutoFetchRef = React.useRef<number>(0);
@@ -279,14 +300,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  useEffect(() => {
+  const syncLeaderboard = async (forceServer: boolean = false) => {
     if (!currentUser) return;
+    try {
+      const { getDocFromCache, getDocFromServer } = await import('firebase/firestore');
+      const lbRef = doc(db, 'system', 'leaderboard');
+      const now = Date.now();
+      const lastLbSync = lastSyncTimes['leaderboard'] || 0;
+      const cacheCooldown = 60000; // 1 minute local cache-reuse cooldown for leaderboard
 
-    // Listen to universal leaderboard doc for all users
-    const lbRef = doc(db, 'system', 'leaderboard');
-    const unsubLb = onSnapshot(lbRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
+      const applyLeaderboardData = (data: any) => {
         setTopVela(data.topVela || []);
         setTopLevel(data.topLevel || []);
         const mH = typeof data.morningHour === 'number' ? data.morningHour : 9;
@@ -299,15 +322,57 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setEveningMinute(eM);
         const nRef = data.nextRefresh || calculateNextRefresh(mH, mM, eH, eM);
         setNextRefresh(nRef);
-      } else {
-        // If doc doesn't exist, try initial fetch
-        fetchLeaderboard();
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'system/leaderboard');
-    });
+      };
 
-    return () => unsubLb();
+      // 1. Try cache first (0 cost)
+      let loadedFromCache = false;
+      try {
+        const cacheSnap = await getDocFromCache(lbRef);
+        if (cacheSnap.exists()) {
+          applyLeaderboardData(cacheSnap.data());
+          loadedFromCache = true;
+          setTotalReadsSaved(prev => {
+            const next = prev + 1;
+            localStorage.setItem('firestore_reads_saved', next.toString());
+            return next;
+          });
+        }
+      } catch (e) {
+        // Safe to ignore cache miss
+      }
+
+      // 2. Fetch from Server if forced, cooldown expired or cache was empty
+      const needsServer = forceServer || !loadedFromCache || (now - lastLbSync > cacheCooldown);
+      if (needsServer) {
+        try {
+          const { getDoc } = await import('firebase/firestore');
+          const serverSnap = await getDoc(lbRef); // standard or server-fallbacked
+          if (serverSnap.exists()) {
+            applyLeaderboardData(serverSnap.data());
+            setLastSyncTimes(prev => ({ ...prev, leaderboard: now }));
+          } else {
+            // Document not found? Try to initialize it
+            if (userProfile?.role === 'admin') {
+              console.log("No leaderboard found, regenerating standard STANDINGS...");
+              await fetchLeaderboard(true);
+            }
+          }
+        } catch (serverErr: any) {
+          if (serverErr.message?.includes('Quota exceeded')) {
+            setHasQuotaError(true);
+          } else {
+            console.error("Leaderboard background sync issue:", serverErr);
+          }
+        }
+      }
+    } catch (importErr) {
+      console.error("Failed to load firestore modules for syncLeaderboard:", importErr);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    syncLeaderboard(false);
   }, [currentUser]);
 
   useEffect(() => {
@@ -339,13 +404,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const searchCharacters = async (queryStr: string) => {
     if (!queryStr || queryStr.length < 1) return [];
     const lowerQuery = queryStr.toLowerCase().trim();
+
+    // Strategy 1: If admin is viewing and we already have all characters locally in state, search them directly.
+    // Extremely fast and saves 100% of network costs.
+    if (userProfile?.role === 'admin' && allCharacters && allCharacters.length > 0) {
+      return allCharacters.filter(c => 
+        c.name.toLowerCase().includes(lowerQuery) || 
+        c.id.toLowerCase().includes(lowerQuery) ||
+        c.keywords?.some(k => k.includes(lowerQuery))
+      );
+    }
+
     try {
-      const { getDocs } = await import('firebase/firestore');
+      const { getDocsFromCache, getDocsFromServer } = await import('firebase/firestore');
       
-      // We'll perform a broad search and then filter locally for better UX
-      // since Firestore doesn't support easy "contains" on strings.
-      
-      // 1. Prefix search by name (already good for "Ayam...")
       const qByName = query(
         collection(db, 'characters'),
         where('name', '>=', queryStr),
@@ -353,31 +425,49 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         limit(20)
       );
       
-      // 2. Keyword search (exact match on elements like "Goreng")
       const qByKeyword = query(
         collection(db, 'characters'),
         where('keywords', 'array-contains', lowerQuery),
         limit(50)
       );
       
-      // 3. Search by ID
       const qById = query(
         collection(db, 'characters'),
         where('__name__', '==', queryStr),
         limit(5)
       );
 
-      const [nameSnap, keywordSnap, idSnap] = await Promise.all([
-        getDocs(qByName), 
-        getDocs(qByKeyword),
-        getDocs(qById)
-      ]);
+      let nameDocs: any[] = [];
+      let keywordDocs: any[] = [];
+      let idDocs: any[] = [];
+
+      try {
+        // Strategy 2: Attempt to query from local persistent cache first!
+        // This is 0-cost because the documents are stored in the client's IndexedDB.
+        const [nameSnap, keywordSnap, idSnap] = await Promise.all([
+          getDocsFromCache(qByName),
+          getDocsFromCache(qByKeyword),
+          getDocsFromCache(qById)
+        ]);
+        nameDocs = nameSnap.docs;
+        keywordDocs = keywordSnap.docs;
+        idDocs = idSnap.docs;
+      } catch (cacheErr) {
+        // Strategy 3: Fallback to server if cache is empty or fails
+        const [nameSnap, keywordSnap, idSnap] = await Promise.all([
+          getDocsFromServer(qByName),
+          getDocsFromServer(qByKeyword),
+          getDocsFromServer(qById)
+        ]);
+        nameDocs = nameSnap.docs;
+        keywordDocs = keywordSnap.docs;
+        idDocs = idSnap.docs;
+      }
       
       const resultsMap = new Map<string, Character>();
       
       const addRes = (doc: any) => {
         const data = doc.data() as Character;
-        // Local filtering to ensure "contains" behavior if it wasn't a perfect prefix match
         if (
           data.name.toLowerCase().includes(lowerQuery) || 
           data.id.toLowerCase().includes(lowerQuery) ||
@@ -387,13 +477,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       };
 
-      nameSnap.docs.forEach(addRes);
-      keywordSnap.docs.forEach(addRes);
-      idSnap.docs.forEach(addRes);
+      nameDocs.forEach(addRes);
+      keywordDocs.forEach(addRes);
+      idDocs.forEach(addRes);
       
       return Array.from(resultsMap.values());
     } catch (err) {
-      console.error("Search characters error:", err);
+      console.error("Search characters error (fallback):", err);
       return [];
     }
   };
@@ -411,6 +501,159 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return Array.from(keywords);
   };
 
+  // Smart Sync & Quota Saver Engine
+  const forceSyncAll = async (forceServer: boolean = false) => {
+    if (!currentUser) return;
+    setIsSyncingData(true);
+    
+    // Synergize Leaderboard into our Unified Sync Pipeline!
+    await syncLeaderboard(forceServer);
+    
+    const now = Date.now();
+    const cooldownPlayer = 45000; // 45 seconds player cooldown
+    const cooldownAdmin = 90000;  // 1.5 minutes admin cooldown (heavy chunks)
+
+    // Reusable, optimized cache-then-server fetch pipeline
+    const syncCollection = async (
+      key: string,
+      qRef: any,
+      setter: (data: any) => void,
+      cooldown: number
+    ) => {
+      let docsLoadedFromCache = false;
+      let currentCacheCount = 0;
+
+      // 1. Load from local IndexedDB cache first (Cost = 0 reads on Firestore server!)
+      try {
+        const cacheSnap = await getDocsFromCache(qRef);
+        if (!cacheSnap.empty) {
+          const cacheData = cacheSnap.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+          setter(cacheData);
+          docsLoadedFromCache = true;
+          currentCacheCount = cacheSnap.docs.length;
+          
+          setTotalReadsSaved(prev => {
+            const next = prev + cacheSnap.docs.length;
+            localStorage.setItem('firestore_reads_saved', next.toString());
+            return next;
+          });
+        }
+      } catch (cacheErr) {
+        // Cache is likely empty, fallback silently
+      }
+
+      // 2. Decide if we call the server based on cooldown timer
+      const lastSync = lastSyncTimes[key] || 0;
+      const needsServerCall = forceServer || (now - lastSync > cooldown) || !docsLoadedFromCache;
+
+      if (needsServerCall) {
+        try {
+          const serverSnap = await getDocsFromServer(qRef);
+          const serverData = serverSnap.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+          setter(serverData);
+          setLastSyncTimes(prev => ({ ...prev, [key]: now }));
+        } catch (serverErr: any) {
+          if (serverErr.message?.includes('Quota exceeded')) {
+            setHasQuotaError(true);
+          } else {
+            console.error(`SmartSync server error for [${key}]:`, serverErr);
+          }
+        }
+      }
+    };
+
+    try {
+      // 1. User characters (Throttled & cached)
+      const qChars = query(collection(db, 'characters'), where('userId', '==', currentUser.uid));
+      await syncCollection('characters', qChars, setCharacters, cooldownPlayer);
+
+      // 2. User logs (Throttled & cached)
+      const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
+      await syncCollection('logs', qLogs, setLogs, cooldownPlayer);
+
+      // 3. User transactions (Sender + Recipient, multi-query cache optimization)
+      const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
+      const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
+
+      const lastTransSync = lastSyncTimes['transactions'] || 0;
+      const transNeedsServer = forceServer || (now - lastTransSync > cooldownPlayer);
+
+      let senderTrans: any[] = [];
+      let recipientTrans: any[] = [];
+      let walletCacheFound = false;
+
+      try {
+        const [castSender, castRecipient] = await Promise.all([
+          getDocsFromCache(qTransSender),
+          getDocsFromCache(qTransRecipient)
+        ]);
+        senderTrans = castSender.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+        recipientTrans = castRecipient.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+        
+        if (senderTrans.length > 0 || recipientTrans.length > 0) {
+          walletCacheFound = true;
+          const combined = [...senderTrans, ...recipientTrans];
+          const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
+          const sorted = unique.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+          setTransactions(sorted);
+
+          setTotalReadsSaved(prev => {
+            const next = prev + castSender.docs.length + castRecipient.docs.length;
+            localStorage.setItem('firestore_reads_saved', next.toString());
+            return next;
+          });
+        }
+      } catch (e) {}
+
+      if (transNeedsServer || !walletCacheFound) {
+        try {
+          const [servSender, servRecipient] = await Promise.all([
+            getDocsFromServer(qTransSender),
+            getDocsFromServer(qTransRecipient)
+          ]);
+          senderTrans = servSender.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+          recipientTrans = servRecipient.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+          
+          const combined = [...senderTrans, ...recipientTrans];
+          const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
+          const sorted = unique.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+          setTransactions(sorted);
+          setLastSyncTimes(prev => ({ ...prev, transactions: now }));
+        } catch (err: any) {
+          if (err.message?.includes('Quota exceeded')) {
+            setHasQuotaError(true);
+          }
+        }
+      }
+
+      // 4. Admin Panels heavy datasets (Only loaded active datasets, bypassing continuous streams)
+      if (userProfile?.role === 'admin') {
+        if (adminPanelActive) {
+          const qAllChars = query(collection(db, 'characters'), limit(500));
+          await syncCollection('allCharacters', qAllChars, setAllCharacters, cooldownAdmin);
+
+          const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(300));
+          await syncCollection('allLogs', qAllLogs, setAllLogs, cooldownAdmin);
+
+          const qAllUsers = query(collection(db, 'users'), limit(300));
+          await syncCollection('allUsers', qAllUsers, setAllUsers, cooldownAdmin);
+
+          const qWarnings = query(collection(db, 'admin_warnings'), orderBy('timestamp', 'desc'), limit(50));
+          await syncCollection('adminWarnings', qWarnings, setAdminWarnings, cooldownAdmin);
+        }
+
+        if (adminPanelActive || allTransactionsActive) {
+          const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(300));
+          await syncCollection('allTransactions', qAllTrans, setAllTransactions, cooldownAdmin);
+        }
+      }
+    } catch (gErr) {
+      console.error("SmartSync background execution error:", gErr);
+    } finally {
+      setIsSyncingData(false);
+    }
+  };
+
   useEffect(() => {
     if (!currentUser) {
       setCharacters([]);
@@ -422,133 +665,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Listen to user's characters
-    const qChars = query(collection(db, 'characters'), where('userId', '==', currentUser.uid));
-    const unsubChars = onSnapshot(qChars, (snapshot) => {
-      const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
-      setCharacters(charsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'characters');
-    });
+    // Trigger cached / hybrid sync instantly on mount or dependency shift
+    forceSyncAll(false);
 
-    // Listen to user's logs - Limited to 20
-    const qLogs = query(collection(db, 'logs'), where('userId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
-    const unsubLogs = onSnapshot(qLogs, (snapshot) => {
-      const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
-      setLogs(logsData);
-    }, (error) => {
-      if (error.message.includes('Quota exceeded')) {
-        setHasQuotaError(true);
-        console.warn('Quota exceeded for logs listener. Real-time updates paused.');
-        return;
-      }
-      handleFirestoreError(error, OperationType.GET, 'logs');
-    });
-
-    // Listen to user's transactions (where user is sender or recipient)
-    const qTransSender = query(collection(db, 'transactions'), where('senderUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
-    const qTransRecipient = query(collection(db, 'transactions'), where('recipientUserId', '==', currentUser.uid), orderBy('timestamp', 'desc'), limit(20));
-    
-    let senderTransList: Transaction[] = [];
-    let recipientTransList: Transaction[] = [];
-
-    const updateTransList = () => {
-      const combined = [...senderTransList, ...recipientTransList];
-      // remove duplicates
-      const unique = Array.from(new Map(combined.map(t => [t.id, t])).values());
-      const sorted = unique.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      setTransactions(sorted);
-    };
-
-    const unsubTransSender = onSnapshot(qTransSender, (snapshot) => {
-      senderTransList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-      updateTransList();
-    }, (error) => {
-      if (error.message.includes('Quota exceeded')) {
-        setHasQuotaError(true);
-        return;
-      }
-      handleFirestoreError(error, OperationType.GET, 'transactions');
-    });
-    
-    const unsubTransRecipient = onSnapshot(qTransRecipient, (snapshot) => {
-      recipientTransList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-      updateTransList();
-    }, (error) => {
-      if (error.message.includes('Quota exceeded')) return;
-      handleFirestoreError(error, OperationType.GET, 'transactions');
-    });
-
-    let unsubAllChars = () => {};
-    let unsubAllLogs = () => {};
-    let unsubAllUsers = () => {};
-    let unsubAllTrans = () => {};
-    let unsubAdminWarnings = () => {};
-
-    // If admin AND the admin panel is active, listen to all characters, logs, users, and warnings to avoid infinite reads
-    if (userProfile?.role === 'admin' && adminPanelActive) {
-      const qAllChars = query(collection(db, 'characters'), limit(500));
-      unsubAllChars = onSnapshot(qAllChars, (snapshot) => {
-        const charsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Character));
-        setAllCharacters(charsData);
-      }, (error) => {
-        if (!error.message.includes('Quota exceeded')) {
-          handleFirestoreError(error, OperationType.LIST, 'characters');
-        }
-      });
-
-      const qAllLogs = query(collection(db, 'logs'), orderBy('timestamp', 'desc'), limit(300));
-      unsubAllLogs = onSnapshot(qAllLogs, (snapshot) => {
-        const logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Log));
-        setAllLogs(logsData);
-      }, (error) => {
-        if (!error.message.includes('Quota exceeded')) {
-          handleFirestoreError(error, OperationType.LIST, 'logs');
-        }
-      });
-
-      const qAllUsers = query(collection(db, 'users'), limit(300));
-      unsubAllUsers = onSnapshot(qAllUsers, (snapshot) => {
-        const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setAllUsers(usersData);
-      }, (error) => {
-        if (!error.message.includes('Quota exceeded')) {
-          handleFirestoreError(error, OperationType.LIST, 'users');
-        }
-      });
-
-      const qWarnings = query(collection(db, 'admin_warnings'), orderBy('timestamp', 'desc'), limit(50));
-      unsubAdminWarnings = onSnapshot(qWarnings, (snapshot) => {
-        const warningsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminWarning));
-        setAdminWarnings(warningsData);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'admin_warnings');
-      });
-    }
-
-    // Separate listener for all transactions so they are only loaded when viewing All Transactions or on Admin Panel
-    if (userProfile?.role === 'admin' && (adminPanelActive || allTransactionsActive)) {
-      const qAllTrans = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(300));
-      unsubAllTrans = onSnapshot(qAllTrans, (snapshot) => {
-        const transData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Transaction));
-        setAllTransactions(transData);
-      }, (error) => {
-        if (!error.message.includes('Quota exceeded')) {
-          handleFirestoreError(error, OperationType.LIST, 'transactions');
-        }
-      });
-    }
+    // Dynamic background poller (Passive update checks every 60 seconds)
+    // Runs in background to catch other user operations without keeping real-time sockets open 
+    const interval = setInterval(() => {
+      forceSyncAll(false);
+    }, 60000);
 
     return () => {
-      unsubChars();
-      unsubLogs();
-      unsubTransSender();
-      unsubTransRecipient();
-      unsubAllChars();
-      unsubAllLogs();
-      unsubAllUsers();
-      unsubAllTrans();
-      unsubAdminWarnings();
+      clearInterval(interval);
     };
   }, [currentUser?.uid, userProfile?.role, adminPanelActive, allTransactionsActive]);
 
@@ -556,7 +683,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser) return;
     const newCharRef = doc(collection(db, 'characters'));
     const now = Date.now();
-    const newChar: Omit<Character, 'id'> = {
+    const newChar: Character = {
+      id: newCharRef.id,
       userId: currentUser.uid,
       name,
       keywords: generateKeywords(name),
@@ -565,11 +693,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: now,
       updatedAt: now,
     };
-    await setDoc(newCharRef, newChar);
+
+    // Optimistic state-updates (Zero server latency, zero stream demands!)
+    setCharacters(prev => [...prev, newChar]);
+    setAllCharacters(prev => [...prev, newChar]);
+
+    await setDoc(newCharRef, {
+      userId: currentUser.uid,
+      name,
+      keywords: generateKeywords(name),
+      stats,
+      isSystem: userProfile?.role === 'system',
+      createdAt: now,
+      updatedAt: now,
+    });
 
     // Create log
     const newLogRef = doc(collection(db, 'logs'));
-    await setDoc(newLogRef, {
+    const logData: any = {
       charId: newCharRef.id,
       charName: name,
       userId: currentUser.uid,
@@ -577,7 +718,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       action: 'CREATE',
       newData: stats,
       timestamp: now,
-    });
+    };
+
+    setLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+    setAllLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+
+    await setDoc(newLogRef, logData);
   };
 
   const clearPriority = (id: string) => {
@@ -590,6 +736,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!char) throw new Error('Character not found');
 
     const now = Date.now();
+
+    // Optimistic Update for stats
+    const updatedChar = { ...char, stats: newStats, updatedAt: now };
+    setCharacters(prev => prev.map(c => c.id === id ? updatedChar : c));
+    setAllCharacters(prev => prev.map(c => c.id === id ? updatedChar : c));
+
     await setDoc(doc(db, 'characters', id), {
       stats: newStats,
       updatedAt: now,
@@ -610,6 +762,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     if (from) logData.from = from;
     if (reason) logData.reason = reason;
+
+    setLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+    setAllLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+
     await setDoc(newLogRef, logData);
 
     // Abuse Detection (Updated Thresholds: Level > 20, Vela > 500,000)
@@ -622,16 +778,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const amount = levelDiff > 20 ? levelDiff : velaDiff;
       const ownerEmail = (allUsers.find(u => u.id === char.userId)?.email) || currentUser.email || 'Unknown';
       
-      await setDoc(warningRef, {
+      const newWarning = {
+        id: warningRef.id,
         userId: char.userId,
         userEmail: ownerEmail,
         charId: id,
         charName: char.name,
-        type,
+        type: type as 'Vela' | 'Level',
         amount,
         message: `[${char.name}] telah melakukan abuse di bagian [${type}] sebanyak [${amount.toLocaleString()}] (${ownerEmail}). Lakukan tindakan segera!`,
         timestamp: now
-      });
+      };
+
+      setAdminWarnings(prev => [newWarning, ...prev]);
+
+      await setDoc(warningRef, newWarning);
     } else if (levelDiff > 5 || (velaDiff > 100000 && from !== 'System (Transfer)')) {
       // Priority Check Highlight (Level > 5 or Vela > 100,000)
       setPriorityItems(prev => [...prev, { id: newLogRef.id, type: 'stat' }]);
@@ -646,6 +807,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const now = Date.now();
     const oldName = char.name;
     
+    // Optimistic Update
+    const updatedChar = { ...char, name: newName, keywords: generateKeywords(newName), updatedAt: now };
+    setCharacters(prev => prev.map(c => c.id === id ? updatedChar : c));
+    setAllCharacters(prev => prev.map(c => c.id === id ? updatedChar : c));
+
     await setDoc(doc(db, 'characters', id), {
       name: newName,
       keywords: generateKeywords(newName),
@@ -654,22 +820,31 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Create log
     const newLogRef = doc(collection(db, 'logs'));
-    await setDoc(newLogRef, {
+    const logData = {
       charId: id,
       charName: newName,
       userId: char.userId,
       username: userProfile?.username || 'Unknown',
-      action: 'UPDATE',
+      action: 'UPDATE' as const,
       reason: `Name changed from "${oldName}" to "${newName}"`,
       timestamp: now,
-    });
+    };
+
+    setLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+    setAllLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+
+    await setDoc(newLogRef, logData);
   };
 
   const updateCharacterPin = async (id: string, newPin: string | null) => {
     if (!currentUser) return;
     const now = Date.now();
+
+    // Optimistic Update
+    setCharacters(prev => prev.map(c => c.id === id ? { ...c, pin: newPin || undefined, updatedAt: now } : c));
+    setAllCharacters(prev => prev.map(c => c.id === id ? { ...c, pin: newPin || undefined, updatedAt: now } : c));
+
     if (newPin === null) {
-      // To remove a field in Firestore, we use deleteField(), but for simplicity we can set it to null or empty string
       await setDoc(doc(db, 'characters', id), {
         pin: null,
         updatedAt: now,
@@ -685,18 +860,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteCharacter = async (id: string) => {
     if (!currentUser) return;
     const char = characters.find(c => c.id === id) || allCharacters.find(c => c.id === id);
+
+    // Optimistic Update
+    setCharacters(prev => prev.filter(c => c.id !== id));
+    setAllCharacters(prev => prev.filter(c => c.id !== id));
+
     await deleteDoc(doc(db, 'characters', id));
     
     // Create log
     const newLogRef = doc(collection(db, 'logs'));
-    await setDoc(newLogRef, {
+    const logData = {
       charId: id,
       charName: char?.name || 'Unknown',
       userId: char?.userId || currentUser.uid,
       username: userProfile?.username || 'Unknown',
-      action: 'DELETE',
+      action: 'DELETE' as const,
       timestamp: Date.now(),
-    });
+    };
+
+    setLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+    setAllLogs(prev => [{ id: newLogRef.id, ...logData }, ...prev]);
+
+    await setDoc(newLogRef, logData);
   };
 
   const deleteUser = async (userId: string) => {
@@ -942,6 +1127,59 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       await batch.commit();
 
+      // Optimistic state-updates for transfers (Ensures instant wallet synchronization with 0 reads!)
+      const updateStatsFn = (charList: Character[]) => charList.map(c => {
+        if (c.id === senderCharId) {
+          return { ...c, stats: newSenderStats, updatedAt: now };
+        }
+        if (c.id === recipientCharId) {
+          return { ...c, stats: newRecipientStats, updatedAt: now };
+        }
+        return c;
+      });
+      setCharacters(prev => updateStatsFn(prev));
+      setAllCharacters(prev => updateStatsFn(prev));
+
+      const newTrans: Transaction = {
+        id: transRef.id,
+        senderCharId,
+        senderCharName: senderChar.name,
+        senderUserId: senderChar.userId,
+        recipientCharId,
+        recipientCharName: recipientChar.name,
+        recipientUserId: recipientChar.userId,
+        amount,
+        reason,
+        timestamp: now
+      };
+      setTransactions(prev => [newTrans, ...prev]);
+      setAllTransactions(prev => [newTrans, ...prev]);
+
+      const logSender = {
+        id: senderLogRef.id,
+        charId: senderCharId,
+        charName: senderChar.name,
+        userId: senderChar.userId,
+        username: userProfile?.username || 'Unknown',
+        action: 'UPDATE' as const,
+        oldData: senderChar.stats,
+        newData: newSenderStats,
+        timestamp: now,
+      };
+      const logRecipient = {
+        id: recipientLogRef.id,
+        charId: recipientCharId,
+        charName: recipientChar.name,
+        userId: recipientChar.userId,
+        username: 'System (Transfer)',
+        action: 'UPDATE' as const,
+        oldData: recipientChar.stats,
+        newData: newRecipientStats,
+        timestamp: now,
+      };
+      setLogs(prev => [logSender, logRecipient, ...prev]);
+      setAllLogs(prev => [logSender, logRecipient, ...prev]);
+
       // Priority Check for Transfers > 100,000
       if (amount > 100000) {
         setPriorityItems(prev => [...prev, { id: transRef.id, type: 'trans' }]);
@@ -987,7 +1225,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       deleteCharacter, deleteUser, banUser, updateUserRole, deleteLog, 
       clearAllLogs, dismissWarning, resetEconomy, resetAllProgress, createTransaction,
       setAdminPanelActive, setAllTransactionsActive,
-      morningHour, morningMinute, eveningHour, eveningMinute, updateLeaderboardHours
+      morningHour, morningMinute, eveningHour, eveningMinute, updateLeaderboardHours,
+      totalReadsSaved, isSyncingData, forceSyncAll, lastSyncTimes
     }}>
       {children}
     </DataContext.Provider>

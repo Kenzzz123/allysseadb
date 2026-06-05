@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 export default function CharacterDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { userProfile, characters, updateCharacter, renameCharacter, deleteCharacter } = useData();
+  const { userProfile, characters, allCharacters, allLogs, updateCharacter, renameCharacter, deleteCharacter } = useData();
   const [character, setCharacter] = useState<any>(null);
   const [hasLoadedAtLeastOnce, setHasLoadedAtLeastOnce] = useState(false);
   const [ownerEmail, setOwnerEmail] = useState<string>('');
@@ -27,24 +27,50 @@ export default function CharacterDetail() {
       return;
     }
 
-    // Otherwise, listen directly to this character doc (especially useful for admins or direct links)
-    let unsub = () => {};
-    import('firebase/firestore').then(({ doc, onSnapshot }) => {
-      unsub = onSnapshot(doc(db, 'characters', id), (snap) => {
-        if (snap.exists()) {
-          setCharacter({ id: snap.id, ...snap.data() });
-        } else {
-          setCharacter(null);
+    // Is it in the admin's preloaded allCharacters?
+    const adminChar = allCharacters?.find(c => c.id === id);
+    if (adminChar) {
+      setCharacter(adminChar);
+      setHasLoadedAtLeastOnce(true);
+      return;
+    }
+
+    // Otherwise, let's load this character doc using Cache-First!
+    let active = true;
+    import('firebase/firestore').then(async ({ doc, getDocFromCache, getDocFromServer }) => {
+      const docRef = doc(db, 'characters', id);
+      try {
+        // 1. Try cache (0-cost)
+        const cacheSnap = await getDocFromCache(docRef);
+        if (active) {
+          if (cacheSnap.exists()) {
+            setCharacter({ id: cacheSnap.id, ...cacheSnap.data() });
+          }
+          setHasLoadedAtLeastOnce(true);
         }
-        setHasLoadedAtLeastOnce(true);
-      }, (err) => {
-        console.error("Error loading character detail doc:", err);
-        setHasLoadedAtLeastOnce(true);
-      });
+      } catch (cacheErr) {
+        // 2. Try server if cache fails
+        try {
+          const serverSnap = await getDocFromServer(docRef);
+          if (active) {
+            if (serverSnap.exists()) {
+              setCharacter({ id: serverSnap.id, ...serverSnap.data() });
+            } else {
+              setCharacter(null);
+            }
+            setHasLoadedAtLeastOnce(true);
+          }
+        } catch (serverErr) {
+          console.error("Error loading character details:", serverErr);
+          if (active) setHasLoadedAtLeastOnce(true);
+        }
+      }
     });
 
-    return () => unsub();
-  }, [id, characters]);
+    return () => {
+      active = false;
+    };
+  }, [id, characters, allCharacters]);
 
   // Load owner's profile on demand (without needing to download allUsers database)
   useEffect(() => {
@@ -71,25 +97,49 @@ export default function CharacterDetail() {
   useEffect(() => {
     if (!id) return;
     
-    let unsub = () => {};
-    
-    import('firebase/firestore').then(({ collection, query, where, orderBy, limit, onSnapshot }) => {
+    let active = true;
+    import('firebase/firestore').then(async ({ collection, query, where, orderBy, limit, getDocsFromCache, getDocsFromServer }) => {
       const q = query(
         collection(db, 'logs'),
         where('charId', '==', id),
         orderBy('timestamp', 'desc'),
         limit(100)
       );
-      
-      unsub = onSnapshot(q, (snap) => {
-        setCharLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'logs');
-      });
+
+      // Check if we can extract this from allLogs first if we are an admin!
+      if (isAdmin && allLogs && allLogs.length > 0) {
+        const localCharLogs = allLogs.filter(log => log.charId === id);
+        if (localCharLogs.length > 0) {
+          if (active) setCharLogs(localCharLogs);
+          return;
+        }
+      }
+
+      // Try reading from cache first (0 cost)
+      try {
+        const cacheSnap = await getDocsFromCache(q);
+        if (!cacheSnap.empty && active) {
+          setCharLogs(cacheSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }
+      } catch (cacheFail) {
+        // Silent pass
+      }
+
+      // Fallback to Server
+      try {
+        const serverSnap = await getDocsFromServer(q);
+        if (active) {
+          setCharLogs(serverSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        }
+      } catch (serverErr) {
+        console.error("Error loading logs from server:", serverErr);
+      }
     });
 
-    return () => unsub();
-  }, [id]);
+    return () => {
+      active = false;
+    };
+  }, [id, isAdmin, allLogs]);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState('');

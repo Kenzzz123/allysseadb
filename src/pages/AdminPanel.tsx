@@ -98,17 +98,102 @@ export default function AdminPanel() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  const filteredCharacters = useMemo(() => {
-    return (allCharacters || []).filter(c => {
-      const owner = (allUsers || []).find(u => u.id === c.userId);
-      const ownerName = owner?.username || '';
-      return c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-             c.userId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-             ownerName.toLowerCase().includes(searchTerm.toLowerCase());
-    }).sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [allCharacters, allUsers, searchTerm]);
+  // 1. Optimize lookups with O(1) Map structures
+  const charactersMap = useMemo(() => {
+    const map = new Map<string, any>();
+    if (allCharacters) {
+      for (const c of allCharacters) {
+        map.set(c.id, c);
+      }
+    }
+    return map;
+  }, [allCharacters]);
 
-  const totalVela = (allCharacters || []).reduce((sum, c) => sum + (c.stats?.vela || 0), 0);
+  const usersMap = useMemo(() => {
+    const map = new Map<string, any>();
+    if (allUsers) {
+      for (const u of allUsers) {
+        map.set(u.id, u);
+      }
+    }
+    return map;
+  }, [allUsers]);
+
+  const userCharactersCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (allCharacters) {
+      for (const c of allCharacters) {
+        const count = map.get(c.userId) || 0;
+        map.set(c.userId, count + 1);
+      }
+    }
+    return map;
+  }, [allCharacters]);
+
+  // 2. Memoized, O(1)-powered filtered lists
+  const filteredCharacters = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    if (!allCharacters) return [];
+    return allCharacters.filter(c => {
+      const owner = usersMap.get(c.userId);
+      const ownerName = owner?.username || '';
+      return c.name.toLowerCase().includes(term) || 
+             c.userId.toLowerCase().includes(term) ||
+             ownerName.toLowerCase().includes(term);
+    }).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [allCharacters, usersMap, searchTerm]);
+
+  const filteredUsers = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    if (!allUsers) return [];
+    return allUsers.filter(u => 
+      (u.username || '').toLowerCase().includes(term) || 
+      (u.email || '').toLowerCase().includes(term)
+    );
+  }, [allUsers, searchTerm]);
+
+  const filteredAndSortedTransactions = useMemo(() => {
+    if (!allTransactions) return [];
+    const term = transSearchTerm.toLowerCase();
+    return allTransactions
+      .filter(t => !term || t.id.toLowerCase().includes(term))
+      .sort((a, b) => {
+        const aPrio = priorityItems.some(p => p.id === a.id);
+        const bPrio = priorityItems.some(p => p.id === b.id);
+        if (aPrio && !bPrio) return -1;
+        if (!aPrio && bPrio) return 1;
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      });
+  }, [allTransactions, transSearchTerm, priorityItems]);
+
+  const filteredAndSortedLogs = useMemo(() => {
+    if (!allLogs) return [];
+    return allLogs
+      .filter(log => {
+        const matchesAction = logFilter === 'ALL' || log.action === logFilter;
+        if (!matchesAction) return false;
+        
+        const clickedChar = charactersMap.get(log.charId);
+        const charName = log.charName || clickedChar?.name || 'System Object';
+        const term = logCharSearchQuery.toLowerCase();
+        
+        return logCharSearchQuery === '' || 
+          charName.toLowerCase().includes(term) ||
+          (log.charId && log.charId.toLowerCase().includes(term)) ||
+          (log.username && log.username.toLowerCase().includes(term));
+      })
+      .sort((a, b) => {
+        const aPrio = priorityItems.some(p => p.id === a.id);
+        const bPrio = priorityItems.some(p => p.id === b.id);
+        if (aPrio && !bPrio) return -1;
+        if (!aPrio && bPrio) return 1;
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      });
+  }, [allLogs, logFilter, logCharSearchQuery, charactersMap, priorityItems]);
+
+  const totalVela = useMemo(() => {
+    return (allCharacters || []).reduce((sum, c) => sum + (c.stats?.vela || 0), 0);
+  }, [allCharacters]);
 
   if (userProfile?.role !== 'admin') {
     return <Navigate to="/dashboard" />;
@@ -311,7 +396,7 @@ export default function AdminPanel() {
               
               <div className="grid grid-cols-1 gap-4">
                 {(filteredCharacters || []).map(char => {
-                  const owner = (allUsers || []).find(u => u.id === char.userId);
+                  const owner = usersMap.get(char.userId);
                   const displayEmail = owner?.email || (char.isSystem ? 'system@game.com' : 'Unknown');
                   
                   return (
@@ -381,8 +466,8 @@ export default function AdminPanel() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(allUsers || []).filter(u => u.username?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase())).map(user => {
-                  const userChars = allCharacters.filter(c => c.userId === user.id);
+                {filteredUsers.map(user => {
+                  const userCharsCount = userCharactersCountMap.get(user.id) || 0;
                   return (
                     <motion.div 
                       layout
@@ -414,7 +499,7 @@ export default function AdminPanel() {
                       <div className="grid grid-cols-2 gap-4 mb-6 pt-4 border-t border-white/5">
                         <div className="bg-black/20 p-3 rounded-xl border border-white/5">
                           <p className="text-[10px] text-neutral-500 font-black uppercase tracking-wider mb-1">Records</p>
-                          <p className="text-white font-bold text-xl">{userChars.length}</p>
+                          <p className="text-white font-bold text-xl">{userCharsCount}</p>
                         </div>
                         <div className="bg-black/20 p-3 rounded-xl border border-white/5">
                           <p className="text-[10px] text-neutral-500 font-black uppercase tracking-wider mb-1">Joined</p>
@@ -495,16 +580,7 @@ export default function AdminPanel() {
               </div>
               
               <div className="space-y-4 max-h-[700px] overflow-y-auto pr-2 no-scrollbar">
-                {(allTransactions || [])
-                  .filter(t => !transSearchTerm || t.id.toLowerCase().includes(transSearchTerm.toLowerCase()))
-                  .sort((a, b) => {
-                    const aPrio = priorityItems.some(p => p.id === a.id);
-                    const bPrio = priorityItems.some(p => p.id === b.id);
-                    if (aPrio && !bPrio) return -1;
-                    if (!aPrio && bPrio) return 1;
-                    return (b.timestamp || 0) - (a.timestamp || 0);
-                  })
-                  .map(log => {
+                {filteredAndSortedTransactions.map(log => {
                     const isPriority = priorityItems.some(p => p.id === log.id && p.type === 'trans');
                     return (
                       <motion.div 
@@ -649,28 +725,11 @@ export default function AdminPanel() {
               </div>
 
               <div className="space-y-3 max-h-[700px] overflow-y-auto pr-2 no-scrollbar">
-                {(allLogs || [])
-                  .filter(log => {
-                    const matchesAction = logFilter === 'ALL' || log.action === logFilter;
-                    const clickedChar = (allCharacters || []).find(c => c.id === log.charId);
+                {filteredAndSortedLogs.map(log => {
+                    const clickedChar = charactersMap.get(log.charId);
                     const charName = log.charName || clickedChar?.name || 'System Object';
-                    const matchesSearch = logCharSearchQuery === '' || 
-                      charName.toLowerCase().includes(logCharSearchQuery.toLowerCase()) ||
-                      (log.charId && log.charId.toLowerCase().includes(logCharSearchQuery.toLowerCase())) ||
-                      (log.username && log.username.toLowerCase().includes(logCharSearchQuery.toLowerCase()));
-                    return matchesAction && matchesSearch;
-                  })
-                  .sort((a, b) => {
-                    const aPrio = priorityItems.some(p => p.id === a.id);
-                    const bPrio = priorityItems.some(p => p.id === b.id);
-                    if (aPrio && !bPrio) return -1;
-                    if (!aPrio && bPrio) return 1;
-                    return (b.timestamp || 0) - (a.timestamp || 0);
-                  })
-                  .map(log => {
-                    const clickedChar = (allCharacters || []).find(c => c.id === log.charId);
-                    const charName = log.charName || clickedChar?.name || 'System Object';
-                    const username = log.username || (allUsers || []).find(u => u.id === log.userId)?.username || 'System';
+                    const owner = usersMap.get(log.userId);
+                    const username = log.username || owner?.username || 'System';
                     const isPriority = priorityItems.some(p => p.id === log.id && p.type === 'stat');
                     
                     let details = '';
